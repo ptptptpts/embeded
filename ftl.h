@@ -40,7 +40,7 @@
 #define NUM_LOG_BLKS		3
 
 #define DRAM_BYTES_OTHER	((NUM_COPY_BUFFERS + NUM_FTL_BUFFERS + NUM_HIL_BUFFERS + NUM_TEMP_BUFFERS) * BYTES_PER_PAGE \
-+ BAD_BLK_BMP_BYTES + DATA_BLK_MAP_BYTES + LOG_BLK_MAP_BYTES + VCOUNT_BYTES)
++ BAD_BLK_BMP_BYTES + DATA_BLK_MAP_BYTES + LOG_BLK_MAP_BYTES + VCOUNT_BYTES + EMPTY_BLK_BMP_BYTES)
 
 #define WR_BUF_PTR(BUF_ID)	(WR_BUF_ADDR + ((UINT32)(BUF_ID)) * BYTES_PER_PAGE)
 #define WR_BUF_ID(BUF_PTR)	((((UINT32)BUF_PTR) - WR_BUF_ADDR) / BYTES_PER_PAGE)
@@ -79,13 +79,13 @@
 // logical address를 virtual address로 연결하는 table
 // page valid bitmap, virtual block 시작 주소, 추가 데이터 저장
 // | .... .... | ~ | .... .... | .... .... | ~ | .... .... | .... .... |
-// 0   virtual block address   4      valid page bitmap    20  option  21
-// virtual block address	: logical block이 위치한 virtual block의 address 저장 ( 0x00000000 : Invalid)
+// 0   virtual block number   4      valid page bitmap    20  option  21
+// virtual block address	: logical block이 위치한 virtual block의 번호 저장 ( 0x00000000 : Invalid)
 // valid page bitmap		: data block의 page가 valid 상태인지 비트로 기록 ('1' : valid)
 // option					: bit 별로 data block의 상태 기록
 //							0 - data block의 exist 여부 ('1' : exist)
 //							1 - log block 사용 여부 ('1' : log block 사용)
-//							2~7 - log block 번호 (0 ~ 63, max = 63)
+//							2~7 - log block 번호 (0 ~ 63 max = 63)
 #define DATA_BLK_MAP_ADDR	(BAD_BLK_BMP_ADDR + BAD_BLK_BMP_BYTES)			// 한 block 안에 있는 한 page마다 valid를 한 bit로 표시
 #define DATA_BLK_MAP_SIZE	(sizeof(UINT32) + (PAGES_PER_BLK / 8) + 1)
 #define DATA_BLK_MAP_BYTES	(NUM_VBLKS * DATA_BLK_MAP_SIZE)		
@@ -102,13 +102,13 @@
 // page mapping table, log block에 연결된 data block 주소 저장
 // | .... .... | ~ | .... .... | .... .... | ~ | .... .... | .... .... | .... .... | ~ | .... .... |
 // 0   virtual block address   4    logical block number   8  pagecnt  9      page number map     136
-// virtual block address	: log block이 위치하고 있는 virtual address
+// virtual block address	: log block이 위치하고 있는 virtual block 번호
 // logical block number  	: log block을 소유하고 있는 logical block number를 표시
 // page cnt					: log block에서 사용한 page 갯수
-// page number map			: log block의 page가 block의 몇번째 page의 data를 담고 있는지 기록 (0~255, 255 : invalid)
+// page number map			: log block의 page가 block의 몇번째 page의 data를 담고 있는지 기록 (0~255, 244 : dirty, 255 : invalid)
 #define LOG_BLK_MAP_ADDR	(DATA_BLK_MAP_ADDR + DATA_BLK_MAP_BYTES)		
 #define LOG_BLK_MAP_SIZE	(PAGES_PER_BLK + 2 * sizeof (UINT32) + 1)
-#define LOG_BLK_MAP_BYTES	(NUM_LOG_BLKS * (PAGES_PER_BLK + 2 * sizeof(UINT32)))
+#define LOG_BLK_MAP_BYTES	(NUM_LOG_BLKS * LOG_BLK_MAP_SIZE)
 #define LOG_BLK_VADDR		0
 #define LOG_BLK_LADDR		4
 #define LOG_BLK_PGCNT		8
@@ -123,9 +123,9 @@
 // block bit map			: block이 empty상태인지 bit단위로 표시 ( '1' : empty )
 #define EMPTY_BLK_BMP_ADDR	(VCOUNT_ADDR + VCOUNT_BYTES)
 #define EMPTY_BLK_BMP_BYTES	(NUM_BANKS * VBLKS_PER_BANK / 8)
-#define EMPTY_BLK_BND		
+#define EMPTY_BLK_BND		1
 
-// #define BLKS_PER_BANK		VBLKS_PER_BANK
+#define BLKS_PER_BANK		VBLKS_PER_BANK
 
 
 ///////////////////////////////
