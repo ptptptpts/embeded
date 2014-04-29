@@ -100,19 +100,21 @@
 
 
 // page mapping table, log block에 연결된 data block 주소 저장
-// | .... .... | ~ | .... .... | .... .... | ~ | .... .... | .... .... | .... .... | ~ | .... .... |
-// 0   virtual block address   4    logical block number   8  pagecnt  9      page number map     136
+// | .... .... | ~ | .... .... | .... .... | ~ | .... .... | .... .... | .... .... | .... .... | ~ | .... .... |
+// 0   virtual block address   4    logical block number   8    bank   9  pagecnt  10      page number map     138
 // virtual block address	: log block이 위치하고 있는 virtual block 번호
 // logical block number  	: log block을 소유하고 있는 logical block number를 표시
+// virtual block bank		: virtual block이 위치한 bank 번호
 // page cnt					: log block에서 사용한 page 갯수
 // page number map			: log block의 page가 block의 몇번째 page의 data를 담고 있는지 기록 (0~255, 244 : dirty, 255 : invalid)
 #define LOG_BLK_MAP_ADDR	(DATA_BLK_MAP_ADDR + DATA_BLK_MAP_BYTES)		
-#define LOG_BLK_MAP_SIZE	(PAGES_PER_BLK + 2 * sizeof (UINT32) + 1)
+#define LOG_BLK_MAP_SIZE	(PAGES_PER_BLK + 2 * sizeof (UINT32) + 2)
 #define LOG_BLK_MAP_BYTES	(NUM_LOG_BLKS * LOG_BLK_MAP_SIZE)
 #define LOG_BLK_VADDR		0
 #define LOG_BLK_LADDR		4
-#define LOG_BLK_PGCNT		8
-#define LOG_BLK_PGMAP		9
+#define LOG_BLK_BANK		8
+#define LOG_BLK_PGCNT		9
+#define LOG_BLK_PGMAP		10
 
 #define VCOUNT_ADDR			(LOG_BLK_MAP_ADDR + LOG_BLK_MAP_BYTES)
 #define VCOUNT_BYTES		((NUM_BANKS * VBLKS_PER_BANK * sizeof(UINT16) + BYTES_PER_SECTOR - 1) / BYTES_PER_SECTOR * BYTES_PER_SECTOR)
@@ -123,7 +125,7 @@
 // block bit map			: block이 empty상태인지 bit단위로 표시 ( '1' : empty )
 #define EMPTY_BLK_BMP_ADDR	(VCOUNT_ADDR + VCOUNT_BYTES)
 #define EMPTY_BLK_BMP_BYTES	(NUM_BANKS * VBLKS_PER_BANK / 8)
-#define EMPTY_BLK_BND		1
+#define EMPTY_BLK_BND		0
 
 #define BLKS_PER_BANK		VBLKS_PER_BANK
 
