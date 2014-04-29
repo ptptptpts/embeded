@@ -35,8 +35,8 @@
 #define MISCBLK_VBN         0x1 // vblock #1 <- misc metadata
 #define MAPBLKS_PER_BANK    ((DATA_BLK_MAP_BYTES / NUM_BANKS) / BYTES_PER_BLK)
 #define LOGBLKMAP_PER_BANK	(LOG_BLK_MAP_BYTES / BYTES_PER_BLK)
-#define EMPTYBLKMAP_PER_BANK	((EMPTY_BLK_BMP_BYTES / NUM_BANKS) / BYTES_PER_BLK)
-#define META_BLKS_PER_BANK  (1 + 1 + MAPBLKS_PER_BANK + LOGBLKMAP_PER_BANK + EMPTYBLKMAP_PER_BANK) // include block #0, misc block
+#define EMPTYBLK_PER_BANK	((EMPTY_BLK_BMP_BYTES / NUM_BANKS) / BYTES_PER_BLK)
+#define META_BLKS_PER_BANK  (1 + 1 + MAPBLKS_PER_BANK + LOGBLKMAP_PER_BANK + EMPTYBLK_PER_BANK) // include block #0, misc block
 
 // the number of sectors of misc. metadata info.
 #define NUM_MISC_META_SECT  ((sizeof(misc_metadata) + BYTES_PER_SECTOR - 1)/ BYTES_PER_SECTOR)
@@ -54,12 +54,12 @@ typedef struct _ftl_statistics
 typedef struct _misc_metadata
 {
 	//UINT32 cur_write_vpn; // physical page for new write
-	UINT32 cur_miscblk_vpn; // current write vpn for logging the misc. metadata
-	UINT32 cur_mapblk_vpn[MAPBLKS_PER_BANK]; // current write vpn for logging the age mapping info.
-	UINT32 cur_logblkmap_vpn[LOGBLKMAP_PER_BANK];
-	UINT32 cur_emptyblk_vpn [EMPTYBLKMAP_PER_BANK];
+	UINT32 cur_miscblk_vbn; // current write vpn for logging the misc. metadata
+	UINT32 cur_mapblk_vbn[MAPBLKS_PER_BANK]; // current write vpn for logging the age mapping info.
+	UINT32 cur_logblkmap_vbn[LOGBLKMAP_PER_BANK];
+	UINT32 cur_emptyblk_vbn [EMPTYBLK_PER_BANK];
 	UINT32 gc_vblock; // vblock number for garbage collection
-	UINT32 free_blk_cnt; // total number of free block count
+	//UINT32 free_blk_cnt; // total number of free block count
 	//UINT32 lpn_list_of_cur_vblock[PAGES_PER_BLK]; // logging lpn list of current write vblock for GC
 }misc_metadata; // per bank
 
@@ -92,8 +92,9 @@ UINT32 full_merge_nblk;
 // block #1: FTL misc. metadata
 // block #2 : data block mapping table
 // block #3 : log block mapping table
-// block #4 : a free block for gc
-// block #5~ : data blocks
+// block #4 : empty block mapping table
+// block #5 : a free block for gc
+// block #6~ : data blocks
 
 //----------------------------------
 // macro functions
@@ -107,16 +108,24 @@ UINT32 full_merge_nblk;
 // page-level striping technique (I/O parallelism)
 #define get_num_bank(lpn)             ((lpn) % NUM_BANKS)
 #define get_bad_blk_cnt(bank)         (g_bad_blk_count[bank])
-#define get_cur_write_vpn(bank)       (g_misc_meta[bank].cur_write_vpn)
-#define set_new_write_vpn(bank, vpn)  (g_misc_meta[bank].cur_write_vpn = vpn)
+//#define get_cur_write_vpn(bank)       (g_misc_meta[bank].cur_write_vpn)
+//#define set_new_write_vpn(bank, vpn)  (g_misc_meta[bank].cur_write_vpn = vpn)
 #define get_gc_vblock(bank)           (g_misc_meta[bank].gc_vblock)
 #define set_gc_vblock(bank, vblock)   (g_misc_meta[bank].gc_vblock = vblock)
-#define set_lpn(bank, page_num, lpn)  (g_misc_meta[bank].lpn_list_of_cur_vblock[page_num] = lpn)
-#define get_lpn(bank, page_num)       (g_misc_meta[bank].lpn_list_of_cur_vblock[page_num])
-#define get_miscblk_vpn(bank)         (g_misc_meta[bank].cur_miscblk_vpn)
-#define set_miscblk_vpn(bank, vpn)    (g_misc_meta[bank].cur_miscblk_vpn = vpn)
-#define get_mapblk_vpn(bank, mapblk_lbn)      (g_misc_meta[bank].cur_mapblk_vpn[mapblk_lbn])
-#define set_mapblk_vpn(bank, mapblk_lbn, vpn) (g_misc_meta[bank].cur_mapblk_vpn[mapblk_lbn] = vpn)
+//#define set_lpn(bank, page_num, lpn)  (g_misc_meta[bank].lpn_list_of_cur_vblock[page_num] = lpn)
+//#define get_lpn(bank, page_num)       (g_misc_meta[bank].lpn_list_of_cur_vblock[page_num])
+#define get_miscblk_vbn(bank)         (g_misc_meta[bank].cur_miscblk_vbn)
+#define set_miscblk_vbn(bank, vbn)    (g_misc_meta[bank].cur_miscblk_vbn = vbn)
+
+#define get_mapblk_vbn(bank, mapblk_lbn)      (g_misc_meta[bank].cur_mapblk_vbn[mapblk_lbn])
+#define set_mapblk_vbn(bank, mapblk_lbn, vbn) (g_misc_meta[bank].cur_mapblk_vbn[mapblk_lbn] = vbn)
+
+#define get_logblkmap_vbn(bank, mapblk_lbn)		(g_misc_meta[bank].cur_logblkmap_vbn[mapblk_lbn])
+#define set_logblkmap_vbn(bank, mapblk_lbn, vbn)		(g_misc_meta[bank].cur_logblkmap_vbn[mapblk_lbn] = vbn)
+
+#define get_emptyblk_vbn(bank, mapblk_lbn)		(g_misc_meta[bank].cur_emptyblk_vbn[mapblk_lbn])
+#define set_emptyblk_vbn(bank, mapblk_lbn, vbn)		(g_misc_meta[bank].cur_emptyblk_vbn[mapblk_lbn] = vbn)
+
 #define CHECK_LPAGE(lpn)              ASSERT((lpn) < NUM_LPAGES)
 #define CHECK_VPAGE(vpn)              ASSERT((vpn) < (VBLKS_PER_BANK * PAGES_PER_BLK))
 
@@ -146,15 +155,15 @@ static UINT32 assign_new_write_vpn(UINT32 const bank);
 
 //=================================================================
 static UINT32 get_dblock (UINT32 const lpn);
-static bool is_exist_dblock (UINT32 const lpn);
-static bool is_exist_dpage (UINT32 const lpn);
-static bool is_valid_dblock (UINT32 const lpn);
+static BOOL8 is_exist_dblock (UINT32 const lpn);
+static BOOL8 is_exist_dpage (UINT32 const lpn);
+static BOOL8 is_valid_dblock (UINT32 const lpn);
 static UINT32 assign_dblock (UINT32 const lpn);
 static UINT32 get_dpage (UINT32 const lpn);
 static UINT32 set_dpage (UINT32 const lpn);
 
-static bool set_invalid_dpage (UINT32 const lpn);
-static bool set_dirty_log_page (UINT32 const lpn);
+static BOOL8 set_invalid_dpage (UINT32 const lpn);
+static BOOL8 set_dirty_log_page (UINT32 const lpn);
 
 static UINT32 set_log_blk (UINT32 const lpn);
 static UINT32 get_log_blk (UINT32 const lpn);
@@ -165,6 +174,7 @@ static UINT32 set_log_page (UINT32 const lpn);
 static UINT32 get_logblk_page (UINT32 const lblk, UINT32 const lpn);
 
 static UINT32 get_empty_blk (UINT32 const bank);
+static BOOL8 set_using_blk (UINT32 const bank, UINT32 const vbn);
 
 static UINT32 garbage_collection (UINT32 const bank);
 static UINT32 full_merge (UINT32 const bank, UINT32 const vblk, UINT32 const lbn);
@@ -175,7 +185,8 @@ static UINT32 get_victim_block (UINT32 const bank);
 static void sanity_check(void)
 {
 	UINT32 dram_requirement = RD_BUF_BYTES + WR_BUF_BYTES + COPY_BUF_BYTES + FTL_BUF_BYTES
-		+ HIL_BUF_BYTES + TEMP_BUF_BYTES + BAD_BLK_BMP_BYTES + PAGE_MAP_BYTES + VCOUNT_BYTES;
+		+ HIL_BUF_BYTES + TEMP_BUF_BYTES + BAD_BLK_BMP_BYTES + EMPTY_BLK_BMP_BYTES + VCOUNT_BYTES
+		+ DATA_BLK_MAP_BYTES + LOG_BLK_MAP_BYTES;
 
 	if ((dram_requirement > DRAM_SIZE) || // DRAM metadata size check
 		(sizeof(misc_metadata) > BYTES_PER_PAGE)) // misc metadata size check
@@ -483,8 +494,8 @@ static void write_page(UINT32 const lpn, UINT32 const sect_offset, UINT32 const 
 	page_offset = sect_offset;	
 	column_cnt  = num_sectors;
 	
-	old_vpn  = get_vpn(lpn);	// 이전에  write가 된 page 번호를 받는다
 	new_vpn  = assign_new_write_vpn(lpn);	// 새로 write를 할 page 번호를 받는다
+	old_vpn  = get_vpn(lpn);	// 이전에  write가 된 page 번호를 받는다
 
 	CHECK_VPAGE (old_vpn);
 	CHECK_VPAGE (new_vpn);
@@ -587,15 +598,12 @@ static void write_page(UINT32 const lpn, UINT32 const sect_offset, UINT32 const 
 								  column_cnt);
 
 	// log block이 가득 찼을 경우 garbage collection
+	/*
 	if (log_blk_cnt == NUM_LOG_BLKS)
 	{
 		garbage_collection(NUM_BANKS);
 	}
-
-	// update metadata
-	//set_lpn(bank, page_num, lpn);	// logical page가 어느 bank의 어느 page와 연결되는지 link 한다
-	//set_vpn(lpn, new_vpn);	// flash memory의 virtual page가 어느 logical page와 link되는지 기록한다
-	//set_vcount(bank, vblock, get_vcount(bank, vblock) + 1);	// virtual page의 vcount를 증가시켜서 valid 상태로 만든다
+	*/		
 }
 
 // get vpn from PAGE_MAP 
@@ -613,13 +621,12 @@ static UINT32 get_vpn(UINT32 const lpn)
 	*/
 	// 아직 data block이 연결되지 않은 곳
 	UINT32 vbn;
-	UINT32 lbpn;
 
-	if (is_exist_dblock (lpn) == false)
+	if (is_exist_dblock (lpn) == FALSE)
 		return NULL;
 
 	// data block에서 valid인 경우
-	if (is_valid_dblock(lpn) == true)
+	if (is_valid_dblock(lpn) == TRUE)
 	{
 		// data block에서 virtual page number 계산해서 반환
 		vbn = get_dblock (lpn);
@@ -642,25 +649,21 @@ static UINT32 get_vpn(UINT32 const lpn)
 static UINT32 assign_new_write_vpn(UINT32 const lpn)
 // nand flash에서 새로 write를 할 virtual page number를 받아온다
 {
-	UINT32 write_vpn;
-	UINT32 vblock;
-	UINT32 bank
-
 	//data block이 있는 page인지 검사
 	if (is_exist_dblock (lpn) == FALSE) 
 	{
 		//data block이 없을 경우 새로 빈 block을 할당하고 page 주소 반환		
 		assign_dblock (lpn);	// data block mapping
 		
-		return get_dpage(lpn);
+		return set_dpage(lpn);
 	}
 	else 
 	{
 		// data block이 있을 경우 처음 기록되는 page인지 검사
-		if (is_exist_dpage (lpn) == TRUE)
+		if (is_exist_dpage (lpn) == FALSE)
 		{
 			// 처음 기록되는 page인 경우 data block에 할당 
-			return get_dpage(lpn); 
+			return set_dpage(lpn); 
 		}
 		else
 		{
@@ -669,6 +672,12 @@ static UINT32 assign_new_write_vpn(UINT32 const lpn)
 			{
 				// data block에 있는 page를 invalid 시킨다
 				set_invalid_dpage (lpn);
+				// log block이 연결되었는지 검사
+				if (get_log_blk (lpn) == 0xffffffff)
+				{
+					// log block이 없을 경우 새로 연결
+					set_log_blk (lpn);
+				}
 			}
 			else
 			{
@@ -680,69 +689,6 @@ static UINT32 assign_new_write_vpn(UINT32 const lpn)
 			return set_log_page (lpn);
 		}			
 	}
-
-	/*
-	// 가장 최근에 write를 한 위치를 받아온다
-	write_vpn = get_cur_write_vpn(bank);
-	vblock    = write_vpn / PAGES_PER_BLK;
-
-	// NOTE: if next new write page's offset is
-	// the last page offset of vblock (i.e. PAGES_PER_BLK - 1),
-
-	// 가장 최근에 write 한 block에 빈 page가 1개밖에 없는지 체크
-	if ((write_vpn % PAGES_PER_BLK) == (PAGES_PER_BLK - 2))
-	{
-		// then, because of the flash controller limitation
-		// (prohibit accessing a spare area (i.e. OOB)),
-		// thus, we persistenly write a lpn list into last page of vblock.
-
-		// mem_copy (dest, src, size)
-		// FTL의 DRAM Buffer에 sram에 저장되어 있는 block의 logical page mapping info를 옮긴다 (mapping data 손실 방지)
-		mem_copy(FTL_BUF(bank), g_misc_meta[bank].lpn_list_of_cur_vblock, sizeof(UINT32) * PAGES_PER_BLK);
-		// fix minor bug
-		// block의 마지막 page에 logical page mapping info를 저장한다
-		nand_page_ptprogram(bank, vblock, PAGES_PER_BLK - 1, 0,
-							((sizeof(UINT32) * PAGES_PER_BLK + BYTES_PER_SECTOR - 1 ) / BYTES_PER_SECTOR), FTL_BUF(bank));
-
-		// sram에 있는 현재 block의 logical page mapping info를 초기화 한다
-		mem_set_sram(g_misc_meta[bank].lpn_list_of_cur_vblock, 0x00000000, sizeof(UINT32) * PAGES_PER_BLK);
-
-		// 가득 찬 block count 증가
-		inc_full_blk_cnt(bank);
-
-		// do garbage collection if necessary
-		if (is_full_all_blks(bank))
-		{
-			// garbage collection을 하고 새로 생긴 page를 반환
-			garbage_collection(bank);	
-			return get_cur_write_vpn(bank);
-		}
-		// 남은 block이 있을 경우, bank 안에서 비어있는 block을 찾는다
-		do
-		{
-			vblock++;
-
-			ASSERT(vblock != VBLKS_PER_BANK);
-		}while (get_vcount(bank, vblock) == VC_MAX);
-	}
-
-	// write page -> next block
-	// write가 들어갈 page 번호와 block 번호가 서로 맞는지 확인한다
-	if (vblock != (write_vpn / PAGES_PER_BLK))
-	{
-		// page 번호와 block 번호가 맞지 않으면 page 번호를 block에 맞게 이동한다
-		write_vpn = vblock * PAGES_PER_BLK;
-	}
-	else
-	{
-		// block번호와 맞으면 block 내의 다음 page에 write를 한다
-		write_vpn++;
-	}
-	// bank에 write가 들어갈 virtual page number를 새로 설정한다
-	set_new_write_vpn(bank, write_vpn);
-
-	return write_vpn;
-	*/
 }
 
 static BOOL32 is_bad_block(UINT32 const bank, UINT32 const vblk_offset)
@@ -780,7 +726,7 @@ static void format(void)
 	{
 		for (i32 = 0; i32 < NUM_VBLKS; i32 += 4) 
 		{
-			write_dram_32 (LOG_BLK_MAP_ADDR + (j * LOG_BLK_MAP_SIZE) + LOG_BLK_PGMAP + i32, 0xffffffff);
+			write_dram_32 (LOG_BLK_MAP_ADDR + (j32 * LOG_BLK_MAP_SIZE) + LOG_BLK_PGMAP + i32, 0xffffffff);
 		}
 	}
 	mem_set_dram(VCOUNT_ADDR, NULL, VCOUNT_BYTES);
@@ -835,22 +781,24 @@ static void init_metadata_sram(void)
 	//----------------------------------------
 	for (bank = 0; bank < NUM_BANKS; bank++)
 	{
-		g_misc_meta[bank].free_blk_cnt = VBLKS_PER_BANK - META_BLKS_PER_BANK;
-		g_misc_meta[bank].free_blk_cnt -= get_bad_blk_cnt(bank);
+		//g_misc_meta[bank].free_blk_cnt = VBLKS_PER_BANK - META_BLKS_PER_BANK;
+		//g_misc_meta[bank].free_blk_cnt -= get_bad_blk_cnt(bank);
 		// NOTE: vblock #0,1 don't use for user space
-		write_dram_16(VCOUNT_ADDR + ((bank * VBLKS_PER_BANK) + 0) * sizeof(UINT16), VC_MAX);
-		write_dram_16(VCOUNT_ADDR + ((bank * VBLKS_PER_BANK) + 1) * sizeof(UINT16), VC_MAX);
+		//write_dram_16(VCOUNT_ADDR + ((bank * VBLKS_PER_BANK) + 0) * sizeof(UINT16), VC_MAX);
+		//write_dram_16(VCOUNT_ADDR + ((bank * VBLKS_PER_BANK) + 1) * sizeof(UINT16), VC_MAX);
 
 		//----------------------------------------
 		// assign misc. block
 		//----------------------------------------
 		// assumption: vblock #1 = fixed location.
 		// Thus if vblock #1 is a bad block, it should be allocate another block.
-		set_miscblk_vpn(bank, MISCBLK_VBN * PAGES_PER_BLK - 1);
-		ASSERT(is_bad_block(bank, MISCBLK_VBN) == FALSE);
-
 		vblock = MISCBLK_VBN;
-
+		while (is_bad_block (bank, vblock) == TRUE)
+		{
+			set_using_blk (bank, vblock);
+		}
+		set_miscblk_vbn(bank, vblock);
+		
 		//----------------------------------------
 		// assign map block
 		//----------------------------------------
@@ -861,10 +809,11 @@ static void init_metadata_sram(void)
 			ASSERT(vblock < VBLKS_PER_BANK);
 			if (is_bad_block(bank, vblock) == FALSE)
 			{
-				set_mapblk_vpn(bank, mapblk_lbn, vblock * PAGES_PER_BLK);
-				write_dram_16(VCOUNT_ADDR + ((bank * VBLKS_PER_BANK) + vblock) * sizeof(UINT16), VC_MAX);
+				set_mapblk_vbn(bank, mapblk_lbn, vblock);
+				//write_dram_16(VCOUNT_ADDR + ((bank * VBLKS_PER_BANK) + vblock) * sizeof(UINT16), VC_MAX);
 				mapblk_lbn++;
 			}
+			set_using_blk (bank, vblock);			
 		}
 
 		//----------------------------------------
@@ -877,20 +826,26 @@ static void init_metadata_sram(void)
 			ASSERT (vblock < VBLKS_PER_BANK);
 			if (is_bad_block (bank, vblock) == FALSE)
 			{
+				set_logblkmap_vbn (bank, mapblk_lbn, vblock);
+				mapblk_lbn++;
 			}
+			set_using_blk (bank, vblock);
 		}
 		
 		//----------------------------------------
 		// assign empty block map block
 		//----------------------------------------
 		mapblk_lbn = 0;
-		while (mapblk_lbn < LOGBLKMAP_PER_BANK)
+		while (mapblk_lbn < EMPTYBLK_PER_BANK)
 		{
 			vblock++;
 			ASSERT (vblock < VBLKS_PER_BANK);
 			if (is_bad_block (bank, vblock) == FALSE)
 			{
+				set_emptyblk_vbn (bank, mapblk_lbn, vblock);
+				mapblk_lbn++;
 			}
+			set_using_blk (bank, vblock);
 		}
 
 		//----------------------------------------
@@ -900,9 +855,10 @@ static void init_metadata_sram(void)
 		{
 			vblock++;
 			// NOTE: free block should not be secleted as a victim @ first GC
-			write_dram_16(VCOUNT_ADDR + ((bank * VBLKS_PER_BANK) + vblock) * sizeof(UINT16), VC_MAX);
+			//write_dram_16(VCOUNT_ADDR + ((bank * VBLKS_PER_BANK) + vblock) * sizeof(UINT16), VC_MAX);
 			// set free block
 			set_gc_vblock(bank, vblock);
+			set_using_blk (bank, vblock);
 
 			ASSERT(vblock < VBLKS_PER_BANK);
 		}while(is_bad_block(bank, vblock) == TRUE);
@@ -912,6 +868,7 @@ static void init_metadata_sram(void)
 // logging misc + vcount metadata
 static void logging_misc_metadata(void)
 {
+	/*
 	UINT32 misc_meta_bytes = NUM_MISC_META_SECT * BYTES_PER_SECTOR; // per bank
 	UINT32 vcount_addr     = VCOUNT_ADDR;
 	UINT32 vcount_bytes    = NUM_VCOUNT_SECT * BYTES_PER_SECTOR; // per bank
@@ -951,43 +908,12 @@ static void logging_misc_metadata(void)
 							FTL_BUF(bank));
 	}
 	flash_finish();
+	*/
 }
 
 // dram에 있는 mapping data를 nand flash로 backup
 static void logging_pmap_table(void)
-{
-	
-	UINT32 bmap_addr	= DATA_BLK_MAP_ADDR;
-	UINT32 bmap_bytes	= DATA_BLK_MAP_BYTES;
-	UINT32 lmap_addr	= LOG_BLK_MAP_ADDR;
-	UINT32 lmap_bytes	= LOG_BLK_MAP_BYTES;
-	UINT32 mapblk_vpn;
-	UINT32 bank;
-	UINT32 bmap_boundary = DATA_BLK_MAP_ADDR + DATA_BLK_MAP_BYTES;
-	UINT32 lmap_boundary = LOG_BLK_MAP_ADDR + LOG_BLK_MAP_BYTES;
-	BOOL32 finished = FALSE;
-
-	for (UINT32 mapblk_lbn = 0; mapblk_lbn < MAPBLKS_PER_BANK; mapblk_lbn++)
-	{
-		flash_finish();
-
-		for (bank = 0; bank < NUM_BANKS; bank)
-		{
-			if (finished)
-			{
-				break;
-			}
-			
-
-
-		}
-
-		if (finished)
-		{
-			break;
-		}
-	}
-	
+{	
 	/*
 	UINT32 pmap_addr  = PAGE_MAP_ADDR;
 	UINT32 pmap_bytes = BYTES_PER_PAGE; // per bank
@@ -1061,6 +987,7 @@ static void load_metadata(void)
 // misc + VCOUNT
 static void load_misc_metadata(void)
 {
+	/*
 	UINT32 misc_meta_bytes = NUM_MISC_META_SECT * BYTES_PER_SECTOR;
 	UINT32 vcount_bytes    = NUM_VCOUNT_SECT * BYTES_PER_SECTOR;
 	UINT32 vcount_addr     = VCOUNT_ADDR;
@@ -1121,10 +1048,12 @@ static void load_misc_metadata(void)
 		}
 	}
 	enable_irq();
+	*/
 }
 
 static void load_pmap_table(void)
 {
+	/*
 	UINT32 pmap_addr = PAGE_MAP_ADDR;
 	UINT32 temp_page_addr;
 	UINT32 pmap_bytes = BYTES_PER_PAGE; // per bank
@@ -1187,6 +1116,7 @@ static void load_pmap_table(void)
 			break;
 		}
 	}
+	*/
 }
 
 static void write_format_mark(void)
@@ -1281,9 +1211,7 @@ static BOOL32 check_format_mark(void)
 	}
 }
 
-// 수정 필요
-
-// BSP interrupt service routine
+// BSP interrupt service routine - incomplete
 void ftl_isr(void)
 {
 	UINT32 bank;
@@ -1327,7 +1255,7 @@ void ftl_isr(void)
 // logical page가 들어간 data block의 virtual block number를 반환 - complete
 static UINT32 get_dblock (UINT32 const lpn)
 {
-	UINT32 d, blk, lbpn, bank;
+	UINT32 blk, lbpn, bank;
 	
 	bank = get_num_bank (lpn);
 	lbpn = lpn / NUM_BANKS;
@@ -1339,9 +1267,9 @@ static UINT32 get_dblock (UINT32 const lpn)
 
 
 // logical page의 data block이 존재하는지 확인 - complete
-static bool is_exist_dblock (UINT32 const lpn)
+static BOOL8 is_exist_dblock (UINT32 const lpn)
 {
-	UINT32 n, lbpn, bank;
+	UINT32 lbpn, bank;
 	UINT32 blk;
 
 	// DRAM에서 data block의 option 정보 read
@@ -1350,18 +1278,17 @@ static bool is_exist_dblock (UINT32 const lpn)
 	blk = lbpn / PAGES_PER_BLK;
 
 	// block valid bit이 활성화 되있는지 검사
-	if (tst_bit_dram (DATA_BLK_MAP_ADDR + (DATA_BLK_MAP_SIZE * (blk * NUM_BANKS + bank)) + DATA_BLK_OP, DATA_BLK_OP_EX) {
-		return true;
+	if (tst_bit_dram (DATA_BLK_MAP_ADDR + (DATA_BLK_MAP_SIZE * (blk * NUM_BANKS + bank)) + DATA_BLK_OP, DATA_BLK_OP_EX)) {
+		return TRUE;
 	}
-	return false;
+	return FALSE;
 }
 
 
 // logical page가 data block이나 log block에 기록된 적이 있는지 확인 - complete
-static bool is_exist_dpage (UINT32 const lpn)
+static BOOL8 is_exist_dpage (UINT32 const lpn)
 {
-	UINT32 i, n;
-	UINT32 blk, lbpn, bank, offset, map_offset, bit_offset;
+	UINT32 blk, lbpn, bank, offset, bit_offset;
 
 	// DRAM에서 data block의 page mapping 정보 read
 	bank = get_num_bank (lpn);
@@ -1373,7 +1300,7 @@ static bool is_exist_dpage (UINT32 const lpn)
 	// data block에서 valid 상태인지 검사
 	if (tst_bit_dram (DATA_BLK_MAP_ADDR + ((blk * NUM_BANKS + bank) * DATA_BLK_MAP_SIZE) + DATA_BLK_VPBMP + (offset / 8), bit_offset))
 	{
-		return true;
+		return TRUE;
 	}
 	else
 	{
@@ -1384,41 +1311,41 @@ static bool is_exist_dpage (UINT32 const lpn)
 			//log block에 page가 기록되어 있는지 검사
 			if (get_logblk_page (blk, lpn) == NULL)
 			{
-				return false;
+				return FALSE;
 			}
 			else
 			{
-				return true;
+				return TRUE;
 			}
 		} 
 		else
 		{
-			return false;
+			return FALSE;
 		}
 	}
 }
 
 
 // logical page가 data block에서 valid 상태인지 확인 - complete
-static bool is_valid_dblock (UINT32 const lpn)
+static BOOL8 is_valid_dblock (UINT32 const lpn)
 {
-	UINT32 blk, offset, mask, bitoffset;
+	UINT32 blk, offset, bitoffset;
 	UINT32 bank, lbpn;
-	UINT8 d;
 
-	bank = get_num_banks (lpn);
+	bank = get_num_bank (lpn);
 	lbpn = lpn / NUM_BANKS;
 	blk = lbpn / PAGES_PER_BLK;
 	offset = lbpn % PAGES_PER_BLK;
 	bitoffset = offset % 8;
 
 	// data block mapping data에서 해당 page의 page bitmap을 검사한다
-	if (tst_bit_dram (DATA_BLK_MAP_ADDR + ((blk * NUM_BANKS + bank) * DATA_BLK_MAP_SIZE) + DATA_BLK_VPBMP + (offset / 8), bitoffset)
+	if (tst_bit_dram (DATA_BLK_MAP_ADDR + ((blk * NUM_BANKS + bank) * DATA_BLK_MAP_SIZE)
+		+ DATA_BLK_VPBMP + (offset / 8), bitoffset))
 	{
-		return true;
+		return TRUE;
 	}
 	
-	return false;
+	return FALSE;
 }
 
 
@@ -1446,6 +1373,7 @@ static UINT32 assign_dblock (UINT32 const lpn)
 }
 
 
+// logical page에 해당하는 virtual page의 주소를 읽어온다
 static UINT32 get_dpage (UINT32 const lpn)
 {
 	UINT32 vbn;
@@ -1481,7 +1409,7 @@ static UINT32 set_dpage (UINT32 const lpn)
 
 
 // data block에서 logical page를 invalid 시킨다 - complete
-static bool set_invalid_dpage (UINT32 const lpn)
+static BOOL8 set_invalid_dpage (UINT32 const lpn)
 {
 	UINT32 lbn, offset, bit_offset;
 	UINT32 bank, lbpn;
@@ -1494,17 +1422,18 @@ static bool set_invalid_dpage (UINT32 const lpn)
 	bit_offset = offset % 8;
 
 	// 현재 상태와 상관없이 valid bit를 clear
-	clr_bit_dram (DATA_BLK_MAP_ADDR + ((blk * NUM_BANKS + bank) * DATA_BLK_MAP_SIZE) + DATA_BLK_VPBMP + (offset / 8), bit_offset);
+	clr_bit_dram (DATA_BLK_MAP_ADDR + ((lbn * NUM_BANKS + bank) * DATA_BLK_MAP_SIZE) + DATA_BLK_VPBMP + (offset / 8), bit_offset);
 
-	return true;
+	return TRUE;
 }
 
 
 // log block에서 logical page를 dirty invalid로 체크한다 - complete
-static bool set_dirty_log_page (UINT32 const lpn)
+static BOOL8 set_dirty_log_page (UINT32 const lpn)
 {
-	UINT32 lblk, pagenum;
+	UINT32 lblk, i;
 	UINT32 bank, lbpn, offset;
+	UINT8 d8;
 
 	// page의 block 내 offset 계산
 	bank = get_num_bank (lpn);
@@ -1529,7 +1458,7 @@ static bool set_dirty_log_page (UINT32 const lpn)
 		}
 	}
 
-	return true;
+	return TRUE;
 }
 
 
@@ -1580,7 +1509,7 @@ static UINT32 set_log_blk (UINT32 const lpn)
 	write_dram_8 (LOG_BLK_MAP_ADDR + i * LOG_BLK_MAP_SIZE + LOG_BLK_PGCNT, 0); // page counter 0로 초기화
 	for (d=0; d < PAGES_PER_BLK; d += 4)		// page number map을 invalid로 초기화
 	{
-		write_dram_32 (LOG_BLK_MAP_ADDR + i * LOG_BLK_MAP_SIZE + LOG_BLK_PGMAP + d; 0xffffffff);
+		write_dram_32 (LOG_BLK_MAP_ADDR + i * LOG_BLK_MAP_SIZE + LOG_BLK_PGMAP + d, 0xffffffff);
 	}
 
 	// log block counter 증가
@@ -1637,7 +1566,7 @@ static UINT32 get_log_page (UINT32 const lpn)
 static UINT32 set_log_page (UINT32 const lpn)
 {
 	UINT32 offset, lbpn, bank;
-	UINT32 blk, lblk, lpage, loffset;
+	UINT32 lblk, lpage, loffset;
 	UINT8 d8;
 		
 	// log block에서 다음에 쓸 page 위치를 받는다
@@ -1650,7 +1579,7 @@ static UINT32 set_log_page (UINT32 const lpn)
 
 	// log block에서 page의 주소를 계산
 	lpage = read_dram_32 (LOG_BLK_MAP_ADDR + (lblk * LOG_BLK_MAP_SIZE) + LOG_BLK_VADDR);
-	lpage = lpage * PAGES_PER_BLOCK + loffset;
+	lpage = lpage * PAGES_PER_BLK + loffset;
 
 	// log block mapping table에 logical page를 연결
 	bank = get_num_bank(lpn);
@@ -1731,7 +1660,7 @@ static UINT32 get_empty_blk (UINT32 const bank)
 
 
 // 해당 bank의 virtual block을 using 상태로 체크 - incomplete
-static bool set_using_blk (UINT32 const bank, UINT32 const vbn)
+static BOOL8 set_using_blk (UINT32 const bank, UINT32 const vbn)
 {
 	UINT32 offset, bit_offset;
 
@@ -1739,7 +1668,7 @@ static bool set_using_blk (UINT32 const bank, UINT32 const vbn)
 	bit_offset = vbn % (8 / NUM_BANKS);
 	clr_bit_dram (EMPTY_BLK_BMP_ADDR + offset, bit_offset + bank);
 
-	return true;
+	return TRUE;
 }
 
 
