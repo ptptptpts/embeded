@@ -40,7 +40,7 @@
 #define NUM_LOG_BLKS		3
 
 #define DRAM_BYTES_OTHER	((NUM_COPY_BUFFERS + NUM_FTL_BUFFERS + NUM_HIL_BUFFERS + NUM_TEMP_BUFFERS) * BYTES_PER_PAGE \
-+ BAD_BLK_BMP_BYTES + DATA_BLK_MAP_BYTES + LOG_BLK_MAP_BYTES + VCOUNT_BYTES + EMPTY_BLK_BMP_BYTES)
++ BAD_BLK_BMP_BYTES + DATA_BLK_BYTES + LOG_BLK_BYTES + VCOUNT_BYTES + EMPTY_BLK_BYTES)
 
 #define WR_BUF_PTR(BUF_ID)	(WR_BUF_ADDR + ((UINT32)(BUF_ID)) * BYTES_PER_PAGE)
 #define WR_BUF_ID(BUF_PTR)	((((UINT32)BUF_PTR) - WR_BUF_ADDR) / BYTES_PER_PAGE)
@@ -86,9 +86,10 @@
 //							0 - data block의 exist 여부 ('1' : exist)
 //							1 - log block 사용 여부 ('1' : log block 사용)
 //							2~7 - log block 번호 (0 ~ 63 max = 63)
-#define DATA_BLK_MAP_ADDR	(BAD_BLK_BMP_ADDR + BAD_BLK_BMP_BYTES)			// 한 block 안에 있는 한 page마다 valid를 한 bit로 표시
-#define DATA_BLK_MAP_SIZE	(sizeof(UINT32) + (PAGES_PER_BLK / 8) + 1)
-#define DATA_BLK_MAP_BYTES	(NUM_VBLKS * DATA_BLK_MAP_SIZE)		
+#define DATA_BLK_ADDR	(BAD_BLK_BMP_ADDR + BAD_BLK_BMP_BYTES)			// 한 block 안에 있는 한 page마다 valid를 한 bit로 표시
+//#define DATA_BLK_SIZE	(sizeof(UINT32) + (PAGES_PER_BLK / 8) + 1)
+#define DATA_BLK_SIZE		24
+#define DATA_BLK_BYTES	(((NUM_VBLKS * DATA_BLK_SIZE) / 128 + 1) * 128)		
 #define DATA_BLK_VADDR		0
 #define DATA_BLK_VPBMP		4
 #define DATA_BLK_OP			20
@@ -107,24 +108,25 @@
 // virtual block bank		: virtual block이 위치한 bank 번호
 // page cnt					: log block에서 사용한 page 갯수
 // page number map			: log block의 page가 block의 몇번째 page의 data를 담고 있는지 기록 (0~255, 244 : dirty, 255 : invalid)
-#define LOG_BLK_MAP_ADDR	(DATA_BLK_MAP_ADDR + DATA_BLK_MAP_BYTES)		
-#define LOG_BLK_MAP_SIZE	(PAGES_PER_BLK + 2 * sizeof (UINT32) + 2)
-#define LOG_BLK_MAP_BYTES	(NUM_LOG_BLKS * LOG_BLK_MAP_SIZE)
+#define LOG_BLK_ADDR	(DATA_BLK_ADDR + DATA_BLK_BYTES)		
+//#define LOG_BLK_SIZE	(PAGES_PER_BLK + 2 * sizeof (UINT32) + 2)
+#define LOG_BLK_SIZE		140
+#define LOG_BLK_BYTES	(((NUM_LOG_BLKS * LOG_BLK_SIZE) / 128 + 1) * 128)
 #define LOG_BLK_VADDR		0
 #define LOG_BLK_LADDR		4
 #define LOG_BLK_BANK		8
 #define LOG_BLK_PGCNT		9
 #define LOG_BLK_PGMAP		10
 
-#define VCOUNT_ADDR			(LOG_BLK_MAP_ADDR + LOG_BLK_MAP_BYTES)
+#define VCOUNT_ADDR			(LOG_BLK_ADDR + LOG_BLK_BYTES)
 #define VCOUNT_BYTES		((NUM_BANKS * VBLKS_PER_BANK * sizeof(UINT16) + BYTES_PER_SECTOR - 1) / BYTES_PER_SECTOR * BYTES_PER_SECTOR)
 
 // empty 상태의 virtual block들을 표시하는 bitmap
 // | .... .... | ~ | .... .... |
 // 0      block bit map       
 // block bit map			: block이 empty상태인지 bit단위로 표시 ( '1' : empty )
-#define EMPTY_BLK_BMP_ADDR	(VCOUNT_ADDR + VCOUNT_BYTES)
-#define EMPTY_BLK_BMP_BYTES	(NUM_BANKS * VBLKS_PER_BANK / 8)
+#define EMPTY_BLK_ADDR	(VCOUNT_ADDR + VCOUNT_BYTES)
+#define EMPTY_BLK_BYTES	(((NUM_BANKS * VBLKS_PER_BANK / 8)/ 128 + 1) * 128)
 #define EMPTY_BLK_BND		0
 
 #define BLKS_PER_BANK		VBLKS_PER_BANK
