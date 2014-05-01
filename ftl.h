@@ -24,6 +24,10 @@
 #ifndef FTL_H
 #define FTL_H
 
+//#define __TEST_GC
+//#define __TEST_WRT
+//#define __TEST_RD
+//#define __TEST_LB
 
 /////////////////
 // DRAM buffers
@@ -101,22 +105,20 @@
 
 
 // page mapping table, log block에 연결된 data block 주소 저장
-// | .... .... | ~ | .... .... | .... .... | ~ | .... .... | .... .... | .... .... | .... .... | ~ | .... .... |
-// 0   virtual block address   4    logical block number   8    bank   9  pagecnt  10      page number map     138
+// | .... .... | ~ | .... .... | .... .... | ~ | .... .... | .... .... | .... .... | ~ | .... .... |
+// 0   virtual block address   4    logical block number   8  pagecnt  9      page number map     137
 // virtual block address	: log block이 위치하고 있는 virtual block 번호
 // logical block number  	: log block을 소유하고 있는 logical block number를 표시
-// virtual block bank		: virtual block이 위치한 bank 번호
 // page cnt					: log block에서 사용한 page 갯수
 // page number map			: log block의 page가 block의 몇번째 page의 data를 담고 있는지 기록 (0~255, 244 : dirty, 255 : invalid)
 #define LOG_BLK_ADDR	(DATA_BLK_ADDR + DATA_BLK_BYTES)		
-//#define LOG_BLK_SIZE	(PAGES_PER_BLK + 2 * sizeof (UINT32) + 2)
+//#define LOG_BLK_SIZE	(PAGES_PER_BLK + 2 * sizeof (UINT32) + 1)
 #define LOG_BLK_SIZE		140
-#define LOG_BLK_BYTES	(((NUM_LOG_BLKS * LOG_BLK_SIZE) / 128 + 1) * 128)
+#define LOG_BLK_BYTES		(((NUM_LOG_BLKS * NUM_BANKS * LOG_BLK_SIZE) / 128 + 1) * 128)
 #define LOG_BLK_VADDR		0
 #define LOG_BLK_LADDR		4
-#define LOG_BLK_BANK		8
-#define LOG_BLK_PGCNT		9
-#define LOG_BLK_PGMAP		10
+#define LOG_BLK_PGCNT		8
+#define LOG_BLK_PGMAP		9
 
 #define VCOUNT_ADDR			(LOG_BLK_ADDR + LOG_BLK_BYTES)
 #define VCOUNT_BYTES		((NUM_BANKS * VBLKS_PER_BANK * sizeof(UINT16) + BYTES_PER_SECTOR - 1) / BYTES_PER_SECTOR * BYTES_PER_SECTOR)
