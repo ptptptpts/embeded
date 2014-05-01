@@ -1539,7 +1539,7 @@ static BOOL8 set_dirty_log_page (UINT32 const lpn)
 	lbpn = lpn / NUM_BANKS;
 	offset = lbpn % PAGES_PER_BLK;
 
-	// log block에서 page 위치 검색
+	// log block 번호 검색
 	lblk = get_log_blk (lpn);
 
 	// log block의 page table에서 page가 존재하는지 검색
@@ -1550,7 +1550,7 @@ static BOOL8 set_dirty_log_page (UINT32 const lpn)
 		d8 = read_dram_8 (LOG_BLK_ADDR + (map_offset * LOG_BLK_SIZE) + LOG_BLK_PGMAP + i);
 		
 		if (d8 == offset)
-		{
+		{			
 			// log block mapping table에서 dirty로 입력
 			write_dram_8 (LOG_BLK_ADDR + (map_offset * LOG_BLK_SIZE) + LOG_BLK_PGMAP + i, 0xFE);
 
@@ -1971,6 +1971,9 @@ static UINT32 full_merge (UINT32 const bank, UINT32 const vblk, UINT32 const lbn
 		if (tst_bit_dram (DATA_BLK_ADDR + (dmap_offset * DATA_BLK_SIZE) + DATA_BLK_VPBMP + offset, bit_offset))
 		{
 			// data block에 있는 내용을 새 block으로 copy back
+#ifdef __TEST_GC
+			uart_printf ("full_merge :: %d from data blk to new blk", i32);
+#endif
 			nand_page_copyback (bank, vbn, i32, nblk, i32);
 		}
 	}
@@ -1986,6 +1989,9 @@ static UINT32 full_merge (UINT32 const bank, UINT32 const vblk, UINT32 const lbn
 		// 유효한 page인 경우 새 block으로 복사
 		if (d8 < PAGES_PER_BLK)
 		{
+#ifdef __TEST_GC
+			uart_printf ("full_merge :: %d from log blk %d to new blk", d8, i32);
+#endif
 			nand_page_copyback (bank, vbn, i32, nblk, d8);
 			// data block bitmap에 표시
 			offset = d8 / 8;
