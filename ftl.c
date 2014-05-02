@@ -184,6 +184,9 @@ static UINT32 garbage_collection (UINT32 const bank, UINT32 const logblk);
 static UINT32 full_merge (UINT32 const bank, UINT32 const vblk, UINT32 const lbn);
 static UINT32 partial_merge (UINT32 const bank, UINT32 const vblk, UINT32 const lbn);
 static UINT32 get_victim_block (UINT32 const bank);
+
+static BOOL8 copy_page (UINT32 const bank, UINT32 const src_blk, UINT32 const src_page
+						,UINT32 const dst_blk, UINT32 const dst_page);
 //=================================================================
 
 static void sanity_check(void)
@@ -702,7 +705,6 @@ static UINT32 get_vpn(UINT32 const lpn)
 	// data block에 data가 없는 경우
 	else
 	{
-
 		// data block에서 invalid인 경우 log block에서 찾아서 반환 (없을경우 자동으로 NULL)
 		return (get_log_page (lpn));
 	}
@@ -1330,6 +1332,7 @@ void ftl_isr(void)
 			uart_printf("BSP interrupt at bank: 0x%x", bank);
 			if (fc == FC_COL_ROW_IN_PROG || fc == FC_IN_PROG || fc == FC_PROG) {
 				uart_print("find runtime bad block when block program...");
+				//uart_printf("find runtime bad block...vblock #: %d, vpage #: %d", GETREG(BSP_ROW_H(bank)) / PAGES_PER_BLK, GETREG(BSP_ROW_H(bank)) % PAGES_PER_BLK);
 			}
 			else {
 				uart_printf("find runtime bad block when block erase...vblock #: %d", GETREG(BSP_ROW_H(bank)) / PAGES_PER_BLK);
@@ -1657,6 +1660,7 @@ static UINT32 get_log_page (UINT32 const lpn)
 	}
 	else
 	{
+		//uart_printf("get_log_page :: ALERT return address is NULL");
 		return NULL;
 	}
 }
@@ -1946,8 +1950,8 @@ static UINT32 partial_merge (UINT32 const bank, UINT32 const vblk, UINT32 const 
 // full merge - complete
 static UINT32 full_merge (UINT32 const bank, UINT32 const vblk, UINT32 const lbn)
 {
-	UINT32 i32, offset, bit_offset;
-	UINT32 nblk, vbn, dmap_offset, lmap_offset;
+	UINT32 i32, j32, offset, bit_offset;
+	UINT32 nblk, vbn, lvbn, dmap_offset, lmap_offset;
 	UINT8 d8;
 
 	// 새로 만들 block 할당
@@ -1960,6 +1964,52 @@ static UINT32 full_merge (UINT32 const bank, UINT32 const vblk, UINT32 const lbn
 	uart_printf ("full_merge :: bank %d, log blk %d, lbn %d, newblk %d", bank, vblk, lbn, nblk);
 #endif
 
+	// 0번 page부터 순서대로 이동
+	vbn = read_dram_32 (DATA_BLK_ADDR + (dmap_offset * DATA_BLK_SIZE) + DATA_BLK_VADDR);
+	lvbn = read_dram_32 (LOG_BLK_ADDR + (lmap_offset * LOG_BLK_SIZE) + LOG_BLK_VADDR);
+	for (i32 = 0; i32 < PAGES_PER_BLK; i32++)
+	{
+		//data block에 있는 경우 data block에서 복사
+		offset = i32 / 8;
+		bit_offset = i32 % 8;
+
+		// data block에 있는 page인 경우
+		if (tst_bit_dram (DATA_BLK_ADDR + (dmap_offset * DATA_BLK_SIZE) + DATA_BLK_VPBMP + offset, bit_offset))
+		{
+			// data block에 있는 내용을 새 block으로 copy back
+#ifdef __TEST_GC
+			uart_printf ("full_merge :: %d from data blk to new blk", i32);
+#endif
+			nand_page_copyback (bank, vbn, i32, nblk, i32);
+		}
+		// log block에 있는지 검사
+		else
+		{
+			// log block mapping table 전체 검사
+			for (j32 = 0; j32 < PAGES_PER_BLK; j32++)
+			{
+				d8 = read_dram_8 (LOG_BLK_ADDR + (lmap_offset * LOG_BLK_SIZE) + LOG_BLK_PGMAP + j32);
+
+				// log block에 찾는 번호가 있을 경우
+				if (d8 == i32)
+				{
+#ifdef __TEST_GC
+					uart_printf ("full_merge :: page %3d is moved from log block %2d's %3d page to new block %2d", d8, lvbn, j32, nblk);
+#endif
+					nand_page_copyback (bank, lvbn, j32, nblk, i32);
+					// data block bitmap에 표시
+					set_bit_dram (DATA_BLK_ADDR + (dmap_offset * DATA_BLK_SIZE) + DATA_BLK_VPBMP + offset, bit_offset);
+					break;
+				}	
+			}
+		}
+	}
+
+	// 정리가 끝난 data block과 log block을 erase
+	nand_block_erase (bank, vbn);
+	nand_block_erase (bank, lvbn);
+
+	/*
 	// data block에 있는 page를 이동
 	vbn = read_dram_32 (DATA_BLK_ADDR + (dmap_offset * DATA_BLK_SIZE) + DATA_BLK_VADDR);
 	for (i32 = 0; i32 < PAGES_PER_BLK; i32++)
@@ -1980,7 +2030,7 @@ static UINT32 full_merge (UINT32 const bank, UINT32 const vblk, UINT32 const lbn
 	// 정리가 끝난 data block은 erase
 	nand_block_erase (bank, vbn);
 
-	// log block에 있는 page를 이동
+	// log block에 있는 page를 이동	
 	vbn = read_dram_32 (LOG_BLK_ADDR + (lmap_offset * LOG_BLK_SIZE) + LOG_BLK_VADDR);
 	for (i32 = 0; i32 < PAGES_PER_BLK; i32++)
 	{
@@ -1990,7 +2040,7 @@ static UINT32 full_merge (UINT32 const bank, UINT32 const vblk, UINT32 const lbn
 		if (d8 < PAGES_PER_BLK)
 		{
 #ifdef __TEST_GC
-			uart_printf ("full_merge :: %d from log blk %d to new blk", d8, i32);
+			uart_printf ("full_merge :: page %3d is moved from log block %2d's %3d page to new block %2d", d8, vbn, i32, nblk);
 #endif
 			nand_page_copyback (bank, vbn, i32, nblk, d8);
 			// data block bitmap에 표시
@@ -1998,12 +2048,14 @@ static UINT32 full_merge (UINT32 const bank, UINT32 const vblk, UINT32 const lbn
 			bit_offset = d8 % 8;		
 			set_bit_dram (DATA_BLK_ADDR + (dmap_offset * DATA_BLK_SIZE) + DATA_BLK_VPBMP + offset, bit_offset);
 		}		
-	}	
+	}
+	
 	// 정리가 끝난 log block은 erase
 	nand_block_erase (bank, vbn);
+	*/
 
 	// 이전에 사용한 log block은 다음 full merge에 사용할 new block으로 설정
-	set_gc_vblock (bank, vbn);
+	set_gc_vblock (bank, lvbn);
 
 	// 새로 완성된 block의 주소 반환
 	return nblk;
@@ -2020,4 +2072,12 @@ static UINT32 get_victim_block (UINT32 const bank)
 	
 	return i;
 }
+
+
+static BOOL8 copy_page (UINT32 const bank, UINT32 const src_blk, UINT32 const src_page
+						,UINT32 const dst_blk, UINT32 const dst_page)
+{
+
+}
+
 

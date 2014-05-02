@@ -24,7 +24,7 @@
 #ifndef FTL_H
 #define FTL_H
 
-#define __TEST_GC
+//#define __TEST_GC
 //#define __TEST_WRT
 //#define __TEST_RD
 //#define __TEST_LB
