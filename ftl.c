@@ -340,8 +340,8 @@ void ftl_open(void)
 	// If necessary, do low-level format
 	// format() should be called after loading scan lists, because format() calls is_bad_block().
 	//----------------------------------------
-	if (check_format_mark() == FALSE) 
-	//if (TRUE)
+	//if (check_format_mark() == FALSE) 
+	if (TRUE)
 	{
 		uart_print("do format");
 		format();
@@ -692,7 +692,8 @@ static UINT32 get_vpn(UINT32 const lpn)
 	if (is_exist_dblock (lpn) == FALSE)
 	{
 		//uart_printf ("GET_VPN :: DATA BLOCK ISN'T EXIST");
-		return NULL;
+		return (get_log_page (lpn));
+		//return NULL;
 	}
 
 	// data block에 data가 존재하는 경우
@@ -725,37 +726,24 @@ static UINT32 assign_new_write_vpn(UINT32 const lpn)
 		//uart_printf ("data block isn't exist, assign new block");
 		//data block이 없을 경우 새로 빈 block을 할당하고 page 주소 반환		
 		//uart_printf ("first written block");
-		assign_dblock (lpn);	// data block mapping
-		
-		return set_dpage(lpn);
+		assign_dblock (lpn);	// data block mapping		
 	}
-	else 
+
+	// log block이 연결되었는지 검사
+	if (get_log_blk (lpn) == 0xff)
 	{
-		// data block이 있을 경우 처음 기록되는 page인지 검사
-		if (is_exist_dpage (lpn) == FALSE)
-		{
-			//uart_printf ("first written page");
-			// 처음 기록되는 page인 경우 data block에 할당 
-			return set_dpage(lpn); 
-		}
-		else
-		{
-			// 기록된 적이 있을 경우 data block에 page가 valid 상태인지 검사
-			if (is_valid_dblock (lpn) == TRUE) 
-			{
-				set_invalid_dpage (lpn);
-				// log block이 연결되었는지 검사
-				if (get_log_blk (lpn) == 0xff)
-				{
-					// log block이 없을 경우 새로 연결
-					set_log_blk (lpn);
-				}
-			}
-			
-			// log block에서 page 반환
-			return set_log_page (lpn);
-		}			
+		// log block이 없을 경우 새로 연결
+		set_log_blk (lpn);
 	}
+
+	// 기록된 적이 있을 경우 data block에 page가 valid 상태인지 검사
+	if (is_valid_dblock (lpn) == TRUE) 
+	{
+		set_invalid_dpage (lpn);		
+	}	
+			
+	// log block에서 page 반환
+	return set_log_page (lpn);					
 }
 
 static BOOL32 is_bad_block(UINT32 const bank, UINT32 const vblk_offset)
@@ -1116,7 +1104,8 @@ static BOOL8 is_exist_dblock (UINT32 const lpn)
 	//uart_printf ("data block option :: %x", read_dram_8 (DATA_BLK_ADDR + (DATA_BLK_SIZE * (blk * NUM_BANKS + bank)) + DATA_BLK_OP));
 
 	// block valid bit이 활성화 되있는지 검사
-	if (tst_bit_dram (DATA_BLK_ADDR + (DATA_BLK_SIZE * (blk * NUM_BANKS + bank)) + DATA_BLK_OP, DATA_BLK_OP_EX)) {
+	//if (tst_bit_dram (DATA_BLK_ADDR + (DATA_BLK_SIZE * (blk * NUM_BANKS + bank)) + DATA_BLK_OP, DATA_BLK_OP_EX)) {
+	if (read_dram_32 (DATA_BLK_ADDR + (DATA_BLK_SIZE * (blk * NUM_BANKS + bank)) + DATA_BLK_VADDR) != 0) {
 		//uart_printf ("dblock is exist");
 		return TRUE;
 	}
@@ -1205,10 +1194,8 @@ static UINT32 assign_dblock (UINT32 const lpn)
 	// data block mapping data 입력
 	map_offset = blk * NUM_BANKS + bank;
 	write_dram_32 (DATA_BLK_ADDR + (map_offset * DATA_BLK_SIZE) + DATA_BLK_VADDR, vblk); // virtual block number 입력
-	for (n=0; n < (PAGES_PER_BLK/8); n++) {			// valid page bitmap을 0으로 초기화
-		write_dram_8 (DATA_BLK_ADDR + (map_offset * DATA_BLK_SIZE) + DATA_BLK_VPBMP + n, 0x00);
-	}
-	write_dram_8 (DATA_BLK_ADDR + (map_offset * DATA_BLK_SIZE) + DATA_BLK_OP, 0x80);	// option 입력
+	//write_dram_8 (DATA_BLK_ADDR + (map_offset * DATA_BLK_SIZE) + DATA_BLK_OP, 0x80);	// option 입력
+	set_bit_dram (DATA_BLK_ADDR + (map_offset * DATA_BLK_SIZE) + DATA_BLK_OP, DATA_BLK_OP_EX);
 
 	return vblk;
 }
