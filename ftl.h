@@ -105,11 +105,13 @@
 
 
 // page mapping table, log block에 연결된 data block 주소 저장
-// | .... .... | ~ | .... .... | .... .... | ~ | .... .... | .... .... | .... .... | ~ | .... .... |
-// 0   virtual block address   4    logical block number   8  pagecnt  9      page number map     137
+// | .... .... | ~ | .... .... | .... .... | ~ | .... .... | .... .... | .... .... | .... .... | .... .... | ~ | .... .... |
+// 0   virtual block address   4    logical block number   8  pagecnt  9  validpg 10 merge st. 11   page number map     139
 // virtual block address	: log block이 위치하고 있는 virtual block 번호
 // logical block number  	: log block을 소유하고 있는 logical block number를 표시
 // page cnt					: log block에서 사용한 page 갯수
+// valid page				: log block에서 valid한 page의 갯수
+// merge stat				: merge 상태를 나타낸다 (0 : swap, partial merge, 1 : full merge)
 // page number map			: log block의 page가 block의 몇번째 page의 data를 담고 있는지 기록 (0~255, 244 : dirty, 255 : invalid)
 #define LOG_BLK_ADDR	(DATA_BLK_ADDR + DATA_BLK_BYTES)		
 //#define LOG_BLK_SIZE	(PAGES_PER_BLK + 2 * sizeof (UINT32) + 1)
@@ -118,7 +120,9 @@
 #define LOG_BLK_VADDR		0
 #define LOG_BLK_LADDR		4
 #define LOG_BLK_PGCNT		8
-#define LOG_BLK_PGMAP		9
+#define LOG_BLK_VLDPG		9
+#define LOG_BLK_MERGE		10
+#define LOG_BLK_PGMAP		11
 
 // empty 상태의 virtual block들을 표시하는 bitmap
 // | .... .... | ~ | .... .... |

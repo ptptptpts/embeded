@@ -1287,11 +1287,15 @@ static BOOL8 set_dirty_log_page (UINT32 const lpn)
 			// log block mapping table에서 dirty로 입력
 			write_dram_8 (LOG_BLK_ADDR + (map_offset * LOG_BLK_SIZE) + LOG_BLK_PGMAP + i, 0xFE);
 
-			break;
+			// valid page counter 감소
+			d8 = read_dram_8 (LOG_BLK_ADDR + (map_offset * LOG_BLK_SIZE) + LOG_BLK_VLDPG);
+			write_dram_8 (LOG_BLK_ADDR + (map_offset * LOG_BLK_SIZE) + LOG_BLK_VLDPG, d8-1);
+			
+			return TRUE;
 		}
 	}
 
-	return TRUE;
+	return FALSE;
 }
 
 
@@ -1340,6 +1344,8 @@ static UINT32 set_log_blk (UINT32 const lpn)
 	write_dram_32 (LOG_BLK_ADDR + offset * LOG_BLK_SIZE + LOG_BLK_VADDR, vblk); // virtual block number 기록
 	write_dram_32 (LOG_BLK_ADDR + offset * LOG_BLK_SIZE + LOG_BLK_LADDR, lbn); // logical block number 기록
 	write_dram_8 (LOG_BLK_ADDR + offset * LOG_BLK_SIZE + LOG_BLK_PGCNT, 0); // page counter 0로 초기화
+	write_dram_8 (LOG_BLK_ADDR + offset * LOG_BLK_SIZE + LOG_BLK_VLDPG, 0); // valid page counter 0으로 초기화
+	write_dram_8 (LOG_BLK_ADDR + offset * LOG_BLK_SIZE + LOG_BLK_MERGE, 0); // merge status를 partial merge로 초기화
 	for (d=0; d < PAGES_PER_BLK; d++)		// page number map을 invalid로 초기화
 	{
 		write_dram_8 (LOG_BLK_ADDR + offset * LOG_BLK_SIZE + LOG_BLK_PGMAP + d, 0xff);
@@ -1399,7 +1405,7 @@ static UINT32 get_log_page (UINT32 const lpn)
 // log block에 page를 할당한다 - complete
 static UINT32 set_log_page (UINT32 const lpn)
 {
-	UINT32 offset, lbpn, bank;
+	UINT32 offset, lbpn, bank, page_offset;
 	UINT32 lblk, lpage, loffset, map_offset;
 	UINT8 d8;
 		
@@ -1444,6 +1450,18 @@ static UINT32 set_log_page (UINT32 const lpn)
 	
 	// log block에 page를 기록할 위치를 한칸 뒤로 이동한다
 	write_dram_8 (LOG_BLK_ADDR + (map_offset * LOG_BLK_SIZE) + LOG_BLK_PGCNT, (UINT8)(loffset + 1));
+
+	// valid page counter를 증가시킨다
+	d8 = read_dram_8 (LOG_BLK_ADDR + (map_offset * LOG_BLK_SIZE) + LOG_BLK_VLDPG);
+	write_dram_8 (LOG_BLK_ADDR + (map_offset * LOG_BLK_SIZE) + LOG_BLK_VLDPG, d8 + 1);
+
+	// 이번에 쓴 page가 순서에 맞지 않을 경우 merge 상태를 full merge로 입력
+	page_offset = (lpn / NUM_BANKS) % PAGES_PER_BLK;	// 이번에 쓰는 page의 block 내 offset 계산
+	if (page_offset != loffset)	// 이번에 쓴 위치와 비교
+	{
+		//full merge로 표시
+		write_dram_8 (LOG_BLK_ADDR + (map_offset * LOG_BLK_SIZE) + LOG_BLK_MERGE, 1);
+	}
 
 	return lpage;
 }
@@ -1750,12 +1768,46 @@ static UINT32 full_merge (UINT32 const bank, UINT32 const vblk, UINT32 const lbn
 // victim block을 선정한다 - sample
 static UINT32 get_victim_block (UINT32 const bank)
 {
-	static UINT32 i = 0;
+	UINT32 i32, map_offset, sel_blk, sel_max;
 	UINT8 d8;
 
-	i = (i+1) % NUM_LOG_BLKS;
-	
-	return i;
+	map_offset = NUM_LOG_BLKS * bank;
+
+	// partial merge가 되는 block 중 valid page가 가장 많은 block 선택	
+	sel_blk = -1;
+	sel_max = 0;
+	for (i32 = 0; i32 < NUM_LOG_BLKS; i32++)
+	{
+		// partial merge가 가능한 block
+		if (read_dram_8 (LOG_BLK_ADDR + ((map_offset + i32)* LOG_BLK_SIZE) + LOG_BLK_MERGE) == 0)
+		{
+			// 현재 최댓값과 비교
+			d8 = read_dram_8 (LOG_BLK_ADDR + ((map_offset + i32) * LOG_BLK_SIZE) + LOG_BLK_VLDPG);
+			if (d8 >= sel_max)
+			{
+				sel_blk = i32;
+				sel_max = (UINT32)d8;
+			}
+		}
+	}
+	// partial merge가 가능한 block이 있으면 우선적으로 처리
+	if (sel_blk != -1)
+	{
+		return sel_blk;
+	}
+
+	// full merge가 되는 block 중에 valid page가 가장 적은 block을 선택
+	sel_max = PAGES_PER_BLK;
+	for (i32 = 0; i32 < NUM_LOG_BLKS; i32++)
+	{
+		d8 = read_dram_8 (LOG_BLK_ADDR + ((map_offset + i32) * LOG_BLK_SIZE) + LOG_BLK_VLDPG);
+		if (d8 < PAGES_PER_BLK)
+		{
+			sel_blk = i32;
+			sel_max = d8;
+		}
+	}
+	return sel_blk;
 }
 
 //sram 내용을 nand flash에 logging한다
