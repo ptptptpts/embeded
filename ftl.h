@@ -151,4 +151,6 @@ void ftl_test_write(UINT32 const lba, UINT32 const num_sectors);
 void ftl_flush(void);
 void ftl_isr(void);
 
+BOOL32 check_format_mark(void);
+
 #endif //FTL_H

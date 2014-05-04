@@ -147,7 +147,6 @@ static void   write_page(UINT32 const lpn, UINT32 const sect_offset, UINT32 cons
 //static void   set_vpn(UINT32 const lpn, UINT32 const vpn);
 //static void   garbage_collection(UINT32 const bank);
 static BOOL32 is_bad_block(UINT32 const bank, UINT32 const vblock);
-static BOOL32 check_format_mark(void);
 static UINT32 get_vpn(UINT32 const lpn);
 //static UINT32 get_vt_vblock(UINT32 const bank);
 static UINT32 assign_new_write_vpn(UINT32 const bank);
@@ -983,7 +982,7 @@ static void write_format_mark(void)
 	while (BSP_FSM(0) != BANK_IDLE);
 }
 
-static BOOL32 check_format_mark(void)
+BOOL32 check_format_mark(void)
 {
 	// This function reads a flash page from (bank #0, block #0) in order to check whether the SSD is formatted or not.
 
@@ -2028,19 +2027,27 @@ static void load_misc_block (void)
 	UINT32 misc_meta_bytes = NUM_MISC_META_SECT * BYTES_PER_SECTOR;
 
     UINT32 load_flag = 0;
-    UINT32 bank, page_num;
+    UINT32 bank, blk;
     UINT32 load_cnt = 0;
 
-    flash_finish();
+#ifdef __TEST_PWRECV
+	uart_printf ("load_misc_block :: start");
+#endif 
 
-	disable_irq();
-	flash_clear_irq();	// clear any flash interrupt flags that might have been set
-
-	// 0번 block 이후에 가장 처음 나오는 valid block에 misc metadata가 저장
-	
 	// misc metadata를 nand에서 읽어온다
     for (bank = 0; bank < NUM_BANKS; bank++)
     {
+		// 0번 block 이후에 가장 처음 나오는 valid block에 misc metadata가 저장
+		blk = MISCBLK_VBN;
+		while (is_bad_block (bank, blk) == TRUE)
+		{
+			blk++;
+		}
+		
+#ifdef __TEST_PWRECV
+		uart_printf ("load_misc_block :: bank %d load misc block from %d", bank, blk);
+#endif 
+
         // misc. metadata read
 		nand_page_ptread(bank,
                          MISCBLK_VBN,
@@ -2048,18 +2055,29 @@ static void load_misc_block (void)
                          0,
                          NUM_MISC_META_SECT,
                          FTL_BUF(bank),
-                         RETURN_ON_ISSUE);
-        mem_copy(&g_misc_meta[bank], FTL_BUF(bank), sizeof(misc_metadata));
+                         RETURN_ON_ISSUE);        
     }
 
 	flash_finish();
-	enable_irq();
+
+	for (bank = 0; bank < NUM_BANKS; bank++)
+	{
+		mem_copy(&g_misc_meta[bank], FTL_BUF(bank), sizeof(misc_metadata));
+	}
+
+#ifdef __TEST_PWRECV
+	uart_printf ("load_misc_block :: start");
+#endif 
 }
 
 static void load_data_block (void)
 {
 	UINT32 bank, nblk, vbn, vpn, dblk_addr;
 	UINT32 remain_bytes, write_bytes;
+
+#ifdef __TEST_PWRECV
+	uart_printf ("load_data_block :: start");
+#endif 
 
 	remain_bytes = DATA_BLK_BYTES / NUM_BANKS;
 
@@ -2086,10 +2104,16 @@ static void load_data_block (void)
 			
 			// nand flash에서 ftl buffer로 logging data 이동
 			nand_page_ptread (bank, vbn, vpn, 0, write_bytes / BYTES_PER_SECTOR, FTL_BUF(bank), RETURN_ON_ISSUE);
+		}
 
+		flash_finish();
+
+		for (bank = 0; bank < NUM_BANKS; bank++)
+		{			
 			// ftl buffer에서 data block mapping table로 logging data 이동
 			mem_copy (dblk_addr + bank * DATA_BLK_SIZE * BLKS_PER_BANK, FTL_BUF(bank), write_bytes);
 		}
+
 		remain_bytes -= write_bytes;	
 		dblk_addr += write_bytes;
 
@@ -2102,13 +2126,20 @@ static void load_data_block (void)
 		}
 	}
 
-	flash_finish();
+#ifdef __TEST_PWRECV
+	uart_printf ("load_data_block :: end");
+#endif 
+
 }
 
 static void load_log_block (void)
 {
 	UINT32 bank, nblk, vbn, vpn, dblk_addr;
 	UINT32 remain_bytes, write_bytes;
+
+#ifdef __TEST_PWRECV
+	uart_printf ("load_log_block :: start");
+#endif 
 
 	remain_bytes = LOG_BLK_BYTES / NUM_BANKS;
 
@@ -2135,10 +2166,15 @@ static void load_log_block (void)
 			
 			// nand flash에서 ftl buffer로 logging data 이동
 			nand_page_ptread (bank, vbn, vpn, 0, write_bytes / BYTES_PER_SECTOR, FTL_BUF(bank), RETURN_ON_ISSUE);
-
+		}
+		flash_finish();
+		for (bank = 0; bank < NUM_BANKS; bank++)
+		{
 			// ftl buffer에서 data block mapping table로 logging data 이동
 			mem_copy (dblk_addr + bank * LOG_BLK_SIZE * NUM_LOG_BLKS, FTL_BUF(bank), write_bytes);
+		
 		}
+
 		remain_bytes -= write_bytes;	
 		dblk_addr += write_bytes;
 
@@ -2151,13 +2187,19 @@ static void load_log_block (void)
 		}
 	}
 
-	flash_finish();
+#ifdef __TEST_PWRECV
+	uart_printf ("load_log_block :: end");
+#endif 
 }
 
 static void load_empty_block (void)
 {
 	UINT32 bank, nblk, vbn, vpn, dblk_addr;
 	UINT32 remain_bytes, write_bytes;
+
+#ifdef __TEST_PWRECV
+	uart_printf ("load_empty_block :: start");
+#endif 
 
 	remain_bytes = EMPTY_BLK_BYTES / NUM_BANKS;
 
@@ -2184,10 +2226,14 @@ static void load_empty_block (void)
 			
 			// nand flash에서 ftl buffer로 logging data 이동
 			nand_page_ptread (bank, vbn, vpn, 0, write_bytes / BYTES_PER_SECTOR, FTL_BUF(bank), RETURN_ON_ISSUE);
-
+		}
+		flash_finish();
+		for (bank = 0; bank < NUM_BANKS; bank++)
+		{			
 			// ftl buffer에서 data block mapping table로 logging data 이동
 			mem_copy (dblk_addr + bank * (EMPTY_BLK_BYTES / NUM_BANKS), FTL_BUF(bank), write_bytes);
 		}
+
 		remain_bytes -= write_bytes;	
 		dblk_addr += write_bytes;
 
@@ -2200,7 +2246,9 @@ static void load_empty_block (void)
 		}
 	}
 
-	flash_finish();
+#ifdef __TEST_PWRECV
+	uart_printf ("load_empty_block :: end");
+#endif 
 }
 
 
