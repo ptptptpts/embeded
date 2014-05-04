@@ -28,6 +28,8 @@
 //#define __TEST_WRT
 //#define __TEST_RD
 //#define __TEST_LB
+#define __TEST_LOGGING
+#define __TEST_PWRECV
 
 /////////////////
 // DRAM buffers

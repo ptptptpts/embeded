@@ -61,6 +61,7 @@ typedef struct _misc_metadata
 	UINT32 cur_logblkmap_vbn[LOGBLKMAP_PER_BANK];
 	UINT32 cur_emptyblk_vbn [EMPTYBLK_PER_BANK];
 	UINT32 gc_vblock; // vblock number for garbage collection
+	UINT32 log_blk_cnt;
 	//UINT32 free_blk_cnt; // total number of free block count
 	//UINT32 lpn_list_of_cur_vblock[PAGES_PER_BLK]; // logging lpn list of current write vblock for GC
 }misc_metadata; // per bank
@@ -82,8 +83,6 @@ UINT32 				  g_ftl_write_buf_id;
 //
 
 //============================================================
-UINT32 recent_empty_blk;
-UINT32 full_merge_nblk;
 static UINT32		log_blk_cnt[NUM_BANKS];
 //============================================================
 
@@ -106,6 +105,11 @@ static UINT32		log_blk_cnt[NUM_BANKS];
 #define dec_full_blk_cnt(bank)  (g_misc_meta[bank].free_blk_cnt++)
 #define inc_mapblk_vpn(bank, mapblk_lbn)    (g_misc_meta[bank].cur_mapblk_vpn[mapblk_lbn]++)
 #define inc_miscblk_vpn(bank)               (g_misc_meta[bank].cur_miscblk_vpn++)
+
+#define get_logblk_cnt(bank)			(g_misc_meta[bank].log_blk_cnt)
+#define inc_logblk_cnt(bank)			(g_misc_meta[bank].log_blk_cnt++)
+#define dec_logblk_cnt(bank)			(g_misc_meta[bank].log_blk_cnt--)
+#define set_logblk_cnt(bank, cnt)		(g_misc_meta[bank].log_blk_cnt = cnt)
 
 // page-level striping technique (I/O parallelism)
 #define get_num_bank(lpn)             ((lpn) % NUM_BANKS)
@@ -340,8 +344,8 @@ void ftl_open(void)
 	// If necessary, do low-level format
 	// format() should be called after loading scan lists, because format() calls is_bad_block().
 	//----------------------------------------
-	//if (check_format_mark() == FALSE) 
-	if (TRUE)
+	if (check_format_mark() == FALSE) 
+	//if (TRUE)
 	{
 		uart_print("do format");
 		format();
@@ -367,22 +371,16 @@ void ftl_open(void)
 // power off recovery
 void ftl_flush(void)
 {
-	/*
-	=======================================
-	Need to implementation
-	=======================================
-	data block mapping table backup
-	log block mapping table backup
-	=======================================
-	*/
-
-	/* ptimer_start(); */
+#ifdef __TEST_LOGGING
+	uart_printf ("ftl_flush :: logging metadata");
+#endif
+	logging_misc_block();
 	logging_data_block ();
 	logging_log_block ();
 	logging_empty_block ();
-	//logging_pmap_table();
-	//logging_misc_metadata();
-	/* ptimer_stop_and_uart_print(); */
+#ifdef __TEST_LOGGING
+	uart_printf ("ftl_flush :: logging complete");
+#endif
 }
 
 // Testing FTL protocol APIs
@@ -812,7 +810,8 @@ static void format(void)
 	// initialize global variable
 	for (i32 = 0; i32 < NUM_BANKS; i32++)
 	{
-		log_blk_cnt[i32] = 0;
+		set_logblk_cnt (i32, 0);
+		//log_blk_cnt[i32] = 0;
 	}
 	//==========================================================
 
@@ -934,10 +933,16 @@ static void init_metadata_sram(void)
 // load flushed FTL metadta
 static void load_metadata(void)
 {
+#ifdef __TEST_PWRECV
+	uart_printf ("load_metadata :: power off recovery");
+#endif 
 	load_misc_block ();
 	load_data_block ();
 	load_log_block ();
 	load_empty_block ();
+#ifdef __TEST_PWRECV
+	uart_printf ("load_metadata :: loading metadata end");
+#endif 
 }
 
 static void write_format_mark(void)
@@ -1311,7 +1316,8 @@ static UINT32 set_log_blk (UINT32 const lpn)
 	lbn = lbpn / PAGES_PER_BLK;
 
 	// log block 갯수가 가득 찼으면 garbage collection을 한다
-	if (log_blk_cnt[bank] == NUM_LOG_BLKS) 
+	//if (log_blk_cnt[bank] == NUM_LOG_BLKS) 
+	if (get_logblk_cnt(bank) == NUM_LOG_BLKS)
 	{
 		garbage_collection (bank, NUM_LOG_BLKS);
 	}
@@ -1352,7 +1358,8 @@ static UINT32 set_log_blk (UINT32 const lpn)
 	}
 
 	// log block counter 증가
-	log_blk_cnt[bank]++;
+	inc_logblk_cnt (bank);
+	//log_blk_cnt[bank]++;
 
 	return vblk;	// 새로 할당 된 log block의 virtual block number를 반환
 }
@@ -1634,7 +1641,8 @@ static UINT32 garbage_collection (UINT32 const bank, UINT32 const logblk)
 	}
 
 	// log block counter 감소
-	log_blk_cnt[bank]--;
+	dec_logblk_cnt  (bank);
+	//log_blk_cnt[bank]--;
 
 	// merge이전에 사용하던 data block이 empty 상태이므로 data block을 반환
 	return vbn;
@@ -1813,59 +1821,48 @@ static UINT32 get_victim_block (UINT32 const bank)
 //sram 내용을 nand flash에 logging한다
 static void logging_misc_block (void)
 {
-	UINT32 bank, nblk, vbn, vpn, dblk_addr;
-	UINT32 remain_bytes, write_bytes;
+	UINT32 misc_meta_bytes = NUM_MISC_META_SECT * BYTES_PER_SECTOR; // per bank
+    UINT32 bank;
 
-	remain_bytes = DATA_BLK_BYTES / NUM_BANKS;
+    flash_finish();
 
-	// 각 bank의 data block mapping data 저장용 block에 mapping data를 나누어 저장한다
-	nblk = 0;
-	vpn = 0;
-	dblk_addr = DATA_BLK_ADDR;
-	while (remain_bytes > 0) 
-	{
-		//한번에 한 page씩 nand로 back up
-		if (remain_bytes > BYTES_PER_PAGE)
-		{
-			write_bytes = BYTES_PER_PAGE;
-		}
-		else
-		{
-			write_bytes = remain_bytes;
-		}
+	// block에 쓰인 이전 log를 삭제
+    for (bank = 0; bank < NUM_BANKS; bank++)
+    {
+        nand_block_erase(bank, get_miscblk_vbn(bank));        
+    }
 
-		// 각 bank에 backup
-		for (bank = 0; bank < NUM_BANKS; bank++) 
-		{
-			vbn = get_mapblk_vbn (bank, nblk);
-			
-			// data block mapping table을 ftl buffer로 이동
-			mem_copy (FTL_BUF(bank), dblk_addr + bank * DATA_BLK_SIZE * BLKS_PER_BANK, write_bytes);
+    // srma에 있는 misc metadata를 nand로 저장
+    for (bank = 0; bank < NUM_BANKS; bank++)
+    {
+		mem_copy(FTL_BUF(bank), &g_misc_meta[bank], misc_meta_bytes);
 
-			// ftl buffer에서 nand flash로 이동
-			nand_page_ptprogram (bank, vbn, vpn, 0, write_bytes / BYTES_PER_SECTOR, FTL_BUF(bank));
-		}
-		remain_bytes -= write_bytes;	
-		dblk_addr += write_bytes;
+        nand_page_ptprogram(bank,
+                            get_miscblk_vbn(bank),
+                            0,
+                            0,
+                            NUM_MISC_META_SECT,
+                            FTL_BUF(bank));
+    }
 
-		// backup block과 page counter 증가
-		vpn++;
-		if (vpn == PAGES_PER_BLK)
-		{
-			nblk++;
-			vpn = 0;
-		}
-	}
-
-	flash_finish();
+    flash_finish();
 }
 
 static void logging_data_block (void)
 {
-	UINT32 bank, nblk, vbn, vpn, dblk_addr;
+	UINT32 i32, bank, nblk, vbn, vpn, dblk_addr;
 	UINT32 remain_bytes, write_bytes;
 
 	remain_bytes = DATA_BLK_BYTES / NUM_BANKS;
+
+	// block에 쓰인 이전 log를 삭제
+	for (bank = 0; bank < NUM_BANKS; bank++) 
+	{
+		for (i32 = 0; i32 < MAPBLKS_PER_BANK; i32++)
+		{
+			nand_block_erase (bank, get_mapblk_vbn (bank, i32));
+		}
+	}
 
 	// 각 bank의 data block mapping data 저장용 block에 mapping data를 나누어 저장한다
 	nblk = 0;
@@ -1911,8 +1908,17 @@ static void logging_data_block (void)
 
 static void logging_log_block (void)
 {
-	UINT32 bank, nblk, vbn, vpn, dblk_addr;
+	UINT32 i32, bank, nblk, vbn, vpn, dblk_addr;
 	UINT32 remain_bytes, write_bytes;
+
+	// block에 쓰인 이전 log를 삭제
+	for (bank = 0; bank < NUM_BANKS; bank++) 
+	{
+		for (i32 = 0; i32 < LOGBLKMAP_PER_BANK; i32++)
+		{
+			nand_block_erase (bank, get_logblkmap_vbn (bank, i32));
+		}
+	}
 
 	remain_bytes = LOG_BLK_BYTES / NUM_BANKS;
 
@@ -1960,8 +1966,17 @@ static void logging_log_block (void)
 
 static void logging_empty_block (void)
 {
-	UINT32 bank, nblk, vbn, vpn, dblk_addr;
+	UINT32 i32, bank, nblk, vbn, vpn, dblk_addr;
 	UINT32 remain_bytes, write_bytes;
+
+	// block에 쓰인 이전 log를 삭제
+	for (bank = 0; bank < NUM_BANKS; bank++) 
+	{
+		for (i32 = 0; i32 < EMPTYBLK_PER_BANK; i32++)
+		{
+			nand_block_erase (bank, get_emptyblk_vbn (bank, i32));
+		}
+	}
 
 	remain_bytes = EMPTY_BLK_BYTES / NUM_BANKS;
 
@@ -2010,6 +2025,35 @@ static void logging_empty_block (void)
 //nand flash에서 sram의 전역변수 값들을 load한다
 static void load_misc_block (void)
 {
+	UINT32 misc_meta_bytes = NUM_MISC_META_SECT * BYTES_PER_SECTOR;
+
+    UINT32 load_flag = 0;
+    UINT32 bank, page_num;
+    UINT32 load_cnt = 0;
+
+    flash_finish();
+
+	disable_irq();
+	flash_clear_irq();	// clear any flash interrupt flags that might have been set
+
+	// 0번 block 이후에 가장 처음 나오는 valid block에 misc metadata가 저장
+	
+	// misc metadata를 nand에서 읽어온다
+    for (bank = 0; bank < NUM_BANKS; bank++)
+    {
+        // misc. metadata read
+		nand_page_ptread(bank,
+                         MISCBLK_VBN,
+                         0,
+                         0,
+                         NUM_MISC_META_SECT,
+                         FTL_BUF(bank),
+                         RETURN_ON_ISSUE);
+        mem_copy(&g_misc_meta[bank], FTL_BUF(bank), sizeof(misc_metadata));
+    }
+
+	flash_finish();
+	enable_irq();
 }
 
 static void load_data_block (void)
