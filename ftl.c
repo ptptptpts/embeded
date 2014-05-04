@@ -1066,13 +1066,20 @@ void ftl_isr(void)
 		if (bsp_intr_flag & (FIRQ_BADBLK_H | FIRQ_BADBLK_L)) {
 			uart_printf("BSP interrupt at bank: 0x%x", bank);
 			if (fc == FC_COL_ROW_IN_PROG || fc == FC_IN_PROG || fc == FC_PROG) {
+				// program에서 생긴 bad block은 data를 다른 위치로 mapping 시켜준다
 				uart_print("find runtime bad block when block program...");
-				//uart_printf("find runtime bad block...vblock #: %d, vpage #: %d", GETREG(BSP_ROW_H(bank)) / PAGES_PER_BLK, GETREG(BSP_ROW_H(bank)) % PAGES_PER_BLK);
+				
 			}
 			else {
+				// erase에서 생긴 bad block은 data를 보존할 필요가 없으므로 사용 못하도록 체크만 한다
 				uart_printf("find runtime bad block when block erase...vblock #: %d", GETREG(BSP_ROW_H(bank)) / PAGES_PER_BLK);
 				ASSERT(fc == FC_ERASE);
 			}
+
+			// bad block난 block은 bad block map에 표시
+
+			// empty block bitmap에 using으로 표시해서 다시 사용할수 없도록 한다
+
 		}
 	}
 }
@@ -2087,6 +2094,10 @@ static void load_data_block (void)
 	dblk_addr = DATA_BLK_ADDR;
 	while (remain_bytes > 0) 
 	{
+#ifdef __TEST_PWRECV
+		uart_printf ("load_data_block :: remain bytes %d", remain_bytes);
+#endif 
+
 		//한번에 한 page씩 nand로 back up
 		if (remain_bytes > BYTES_PER_PAGE)
 		{
@@ -2102,6 +2113,10 @@ static void load_data_block (void)
 		{
 			vbn = get_mapblk_vbn (bank, nblk);
 			
+#ifdef __TEST_PWRECV
+			uart_printf ("load_data_block :: bank %d load data block from %d %d th page", bank, vbn, vpn);
+#endif 
+
 			// nand flash에서 ftl buffer로 logging data 이동
 			nand_page_ptread (bank, vbn, vpn, 0, write_bytes / BYTES_PER_SECTOR, FTL_BUF(bank), RETURN_ON_ISSUE);
 		}
@@ -2149,6 +2164,10 @@ static void load_log_block (void)
 	dblk_addr = LOG_BLK_ADDR;
 	while (remain_bytes > 0) 
 	{
+#ifdef __TEST_PWRECV
+		uart_printf ("load_log_block :: remain bytes %d", remain_bytes);
+#endif 
+
 		//한번에 한 page씩 nand로 back up
 		if (remain_bytes > BYTES_PER_PAGE)
 		{
@@ -2164,6 +2183,10 @@ static void load_log_block (void)
 		{
 			vbn = get_logblkmap_vbn (bank, nblk);
 			
+#ifdef __TEST_PWRECV
+			uart_printf ("load_log_block :: bank %d load log block from %d %d th page", bank, vbn, vpn);
+#endif 
+
 			// nand flash에서 ftl buffer로 logging data 이동
 			nand_page_ptread (bank, vbn, vpn, 0, write_bytes / BYTES_PER_SECTOR, FTL_BUF(bank), RETURN_ON_ISSUE);
 		}
@@ -2209,6 +2232,10 @@ static void load_empty_block (void)
 	dblk_addr = EMPTY_BLK_ADDR;
 	while (remain_bytes > 0) 
 	{
+#ifdef __TEST_PWRECV
+		uart_printf ("load_empty_block :: remain bytes %d", remain_bytes);
+#endif 
+
 		//한번에 한 page씩 nand로 back up
 		if (remain_bytes > BYTES_PER_PAGE)
 		{
@@ -2224,6 +2251,10 @@ static void load_empty_block (void)
 		{
 			vbn = get_emptyblk_vbn (bank, nblk);
 			
+#ifdef __TEST_PWRECV
+			uart_printf ("load_empty_block :: bank %d load empty block from %d %d th page", bank, vbn, vpn);
+#endif 
+
 			// nand flash에서 ftl buffer로 logging data 이동
 			nand_page_ptread (bank, vbn, vpn, 0, write_bytes / BYTES_PER_SECTOR, FTL_BUF(bank), RETURN_ON_ISSUE);
 		}
