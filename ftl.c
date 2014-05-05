@@ -36,6 +36,8 @@ typedef struct _misc_metadata
 	UINT32 cur_emptyblk_vbn [EMPTYBLK_PER_BANK];
 	UINT32 gc_vblock; // vblock number for garbage collection
 	UINT32 log_blk_cnt;
+	UINT32 recent_gc_empty;
+	UINT32 recent_empty_blk;
 	//UINT32 free_blk_cnt; // total number of free block count
 	//UINT32 lpn_list_of_cur_vblock[PAGES_PER_BLK]; // logging lpn list of current write vblock for GC
 }misc_metadata; // per bank
@@ -101,6 +103,12 @@ UINT32 				  g_ftl_write_buf_id;
 
 #define get_emptyblk_vbn(bank, mapblk_lbn)		(g_misc_meta[bank].cur_emptyblk_vbn[mapblk_lbn])
 #define set_emptyblk_vbn(bank, mapblk_lbn, vbn)		(g_misc_meta[bank].cur_emptyblk_vbn[mapblk_lbn] = vbn)
+
+#define get_recent_gc_empty(bank)				(g_misc_meta[bank].recent_gc_empty)
+#define set_recent_gc_empty(bank, vbn)			(g_misc_meta[bank].recent_gc_empty = vbn)
+
+#define get_recent_empty_blk(bank)				(g_misc_meta[bank].recent_empty_blk)
+#define set_recent_empty_blk(bank, vbn)		(g_misc_meta[bank].recent_empty_blk = vbn)
 
 #define CHECK_LPAGE(lpn)              ASSERT((lpn) < NUM_LPAGES)
 #define CHECK_VPAGE(vpn)              ASSERT((vpn) < (VBLKS_PER_BANK * PAGES_PER_BLK))
@@ -771,7 +779,8 @@ static void format(void)
 	for (i32 = 0; i32 < NUM_BANKS; i32++)
 	{
 		set_logblk_cnt (i32, 0);
-		//log_blk_cnt[i32] = 0;
+		set_recent_gc_empty (i32, 0);
+		set_recent_empty_blk (i32, 0);
 	}
 	//==========================================================
 
@@ -1517,14 +1526,25 @@ static UINT32 get_logblk_page (UINT32 const lblk, UINT32 const lpn)
 // 같은 bank에서 empty block 한개를 반환한다 - complete
 static UINT32 get_empty_blk (UINT32 const bank)
 {
-	UINT32 offset;
+	UINT32 offset, recent_offset;
 	UINT32 i, bytes, vbn;
 		
 	//uart_printf("get_empty_blk :: bank %d", bank);
 
+	// 최근에 gc로 얻은 empty block이 있으면 우선적으로 사용
+	vbn = get_recent_gc_empty (bank);
+	if (vbn != 0)
+	{
+		set_using_blk (bank, vbn);
+		set_recent_gc_empty (bank, 0);
+		return vbn;
+	}
+
 	// empty blk bitmap에서 한 byte씩 검사
+	recent_offset = get_recent_empty_blk (bank) / 8; 
 	offset = bank * BLKS_PER_BANK / 8;
-	for (bytes = 0; bytes < (BLKS_PER_BANK / 8); bytes++)
+	// 최근에 empty block을 얻은 위치부터 검사
+	for (bytes = recent_offset; bytes < (BLKS_PER_BANK / 8); bytes++)
 	{
 		// bank에 해당하는 bit를 검사
 		for (i=0; i < 8; i++)
@@ -1536,13 +1556,40 @@ static UINT32 get_empty_blk (UINT32 const bank)
 				// empty block bit map에 using으로 표시
 				set_using_blk (bank, vbn);
 
+				// 최근에 empty block을 검색한 위치를 갱신
+				set_recent_empty_blk (bank, vbn);
+
 				//uart_printf ("get_empty_blk :: vbn %d offset %d bit_offset %d", vbn, offset+bytes, 7-i);
 
 				return vbn;
 			}
 		}
 	}
-	
+
+	// 처음부터 다시 검사
+	// 최근에 empty block을 얻은 위치부터 검사
+	for (bytes = 0; bytes < recent_offset; bytes++)
+	{
+		// bank에 해당하는 bit를 검사
+		for (i=0; i < 8; i++)
+		{
+			if (tst_bit_dram(EMPTY_BLK_ADDR + offset + bytes, 7-i))
+			{
+				// bit에 empty로 표시되었을 경우 vbn 반환
+				vbn = bytes * 8 + i;
+				// empty block bit map에 using으로 표시
+				set_using_blk (bank, vbn);
+
+				// 최근에 empty block을 검색한 위치를 갱신
+				set_recent_empty_blk (bank, vbn);
+
+				//uart_printf ("get_empty_blk :: vbn %d offset %d bit_offset %d", vbn, offset+bytes, 7-i);
+
+				return vbn;
+			}
+		}
+	}
+
 	// 그래도 빈 block이 없으면 garbage collection 시도
 	return garbage_collection(bank, NUM_LOG_BLKS);
 }
@@ -1636,6 +1683,9 @@ static UINT32 garbage_collection (UINT32 const bank, UINT32 const logblk)
 
 	// 이전에 사용한 data block을 empty block mapping table에 표시
 	set_empty_blk (bank, vbn);
+
+	// garbage collection으로 얻은 empty block으로 표시
+	set_recent_gc_empty (bank, vbn);
 
 	// log block mapping table 초기화
 	offset = bank * NUM_LOG_BLKS + vblk;
