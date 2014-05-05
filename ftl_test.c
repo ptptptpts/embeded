@@ -55,14 +55,14 @@ BOOL32 _TestCase08(void);
 //----------------------------------
 void ftl_test(void)
 {
-	//_TestCase00();
-	//_TestCase01();
-	//_TestCase02();
-	//_TestCase03();
-	//_TestCase04();
-	//_TestCase05();
-	//_TestCase06();
-	//_TestCase07();
+	_TestCase00();
+	_TestCase01();
+	_TestCase02();
+	_TestCase03();
+	_TestCase04();
+	_TestCase05();
+	_TestCase06();
+	_TestCase07();
 	_TestCase08();
 }
 

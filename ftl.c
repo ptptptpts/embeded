@@ -1,29 +1,3 @@
-// Copyright 2011 INDILINX Co., Ltd.
-//
-// This file is part of Jasmine.
-//
-// Jasmine is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// Jasmine is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with Jasmine. See the file COPYING.
-// If not, see <http://www.gnu.org/licenses/>.
-//
-// GreedyFTL source file
-//
-// Author; Sang-Phil Lim (SKKU VLDB Lab.)
-//
-// - support POR
-//  + fixed metadata area (Misc. block/Map block)
-//  + logging entire FTL metadata when each ATA commands(idle/ready/standby) was issued
-//
 
 #include "jasmine.h"
 
@@ -81,10 +55,6 @@ UINT32 				  g_ftl_write_buf_id;
 //
 // New Implement
 //
-
-//============================================================
-static UINT32		log_blk_cnt[NUM_BANKS];
-//============================================================
 
 //----------------------------------
 // NAND layout
@@ -153,6 +123,8 @@ static UINT32 assign_new_write_vpn(UINT32 const bank);
 
 
 //=================================================================
+static void blk_recovery (UINT32 const bank, UINT32 const vpn);
+
 static UINT32 get_dblock (UINT32 const lpn);
 static BOOL8 is_exist_dblock (UINT32 const lpn);
 static BOOL8 is_exist_dpage (UINT32 const lpn);
@@ -190,6 +162,8 @@ static void load_misc_block (void);
 static void load_data_block (void);
 static void load_log_block (void);
 static void load_empty_block (void);
+
+static void mem_copy_mod (void * const dst, const void * const src, UINT32 const num_bytes);
 //=================================================================
 
 static void sanity_check(void)
@@ -672,19 +646,6 @@ static void write_page(UINT32 const lpn, UINT32 const sect_offset, UINT32 const 
 // get vpn from PAGE_MAP 
 static UINT32 get_vpn(UINT32 const lpn)
 {
-	/*
-	=======================================
-	Need to implementation
-	=======================================
-	logical page가 data block에 있을 경우
-		data block에서 page 주소 반환
-	logical page가 log block에 있을 경우
-		log block에서 page 주소 반환
-	=======================================
-	*/
-	// 아직 data block이 연결되지 않은 곳
-	UINT32 vbn;
-
 	// data block이 없는 경우
 	if (is_exist_dblock (lpn) == FALSE)
 	{
@@ -1041,6 +1002,7 @@ void ftl_isr(void)
 {
 	UINT32 bank;
 	UINT32 bsp_intr_flag;
+	UINT32 vpn, vbn;
 
 	uart_print("BSP interrupt occured...");
 	// interrupt pending clear (ICU)
@@ -1065,25 +1027,65 @@ void ftl_isr(void)
 		}
 		if (bsp_intr_flag & (FIRQ_BADBLK_H | FIRQ_BADBLK_L)) {
 			uart_printf("BSP interrupt at bank: 0x%x", bank);
+
+			// bad block이 발생한 page와 bank 번호 load
+			vpn = GETREG(BSP_ROW_H(bank));
+			vbn = vpn / PAGES_PER_BANK;
+
 			if (fc == FC_COL_ROW_IN_PROG || fc == FC_IN_PROG || fc == FC_PROG) {
 				// program에서 생긴 bad block은 data를 다른 위치로 mapping 시켜준다
 				uart_print("find runtime bad block when block program...");
-				
+				blk_recovery (bank, vpn);
 			}
 			else {
 				// erase에서 생긴 bad block은 data를 보존할 필요가 없으므로 사용 못하도록 체크만 한다
-				uart_printf("find runtime bad block when block erase...vblock #: %d", GETREG(BSP_ROW_H(bank)) / PAGES_PER_BLK);
+				uart_printf("find runtime bad block when block erase...vblock #: %d", vbn);
 				ASSERT(fc == FC_ERASE);
 			}
 
 			// bad block난 block은 bad block map에 표시
+			set_bit_dram (BAD_BLK_BMP_ADDR + bank * (VBLKS_PER_BANK / 8 + 1), vbn);
 
 			// empty block bitmap에 using으로 표시해서 다시 사용할수 없도록 한다
-
+			set_using_blk (bank, vbn);
 		}
 	}
 }
 
+
+static void blk_recovery (UINT32 const bank, UINT32 const vpn)
+{
+	UINT32 vbn, badpage, logblk, new_blk;
+	UINT32 d32, i32;
+
+	vbn = vpn / PAGES_PER_BLK;
+	badpage = vpn % PAGES_PER_BLK;
+
+	// log block에서 vbn을 검색
+	for (logblk = 0; logblk < NUM_LOG_BLKS; logblk++)
+	{
+		d32 = read_dram_32 (LOG_BLK_ADDR + ((bank * NUM_LOG_BLKS + logblk) * LOG_BLK_SIZE) + LOG_BLK_VADDR);
+		if (d32 == vbn)
+		{
+			break;
+		}
+	}
+
+	// 새 block으로 bad block이 난 page를 제외하고 옮긴다
+	new_blk = get_empty_blk (bank);
+
+	// 순서대로 write하기 때문에 bad block이 발생한 page 전까지만 data가 존재
+	for (i32 = 0; i32 < badpage; i32++)
+	{
+		nand_page_copyback (bank, vbn, i32, new_blk, i32);
+	}
+
+	// bad block이 발생한 page는 write buffer에서 데이터를 읽어온다
+	nand_page_ptprogram_from_host (bank, new_blk, badpage, 0, SECTORS_PER_PAGE);
+	
+	// log block mapping table에 새로 연결
+	write_dram_32 (LOG_BLK_ADDR + ((bank * NUM_LOG_BLKS + logblk) * LOG_BLK_SIZE) + LOG_BLK_VADDR, new_blk);
+}
 
 // logical page가 들어간 data block의 virtual block number를 반환 - complete
 static UINT32 get_dblock (UINT32 const lpn)
@@ -1192,7 +1194,6 @@ static BOOL8 is_valid_dblock (UINT32 const lpn)
 static UINT32 assign_dblock (UINT32 const lpn)
 {
 	UINT32 vblk, blk, bank, lbpn, map_offset;
-	UINT32 n;
 	
 	//uart_printf("assign new data block : %d", lpn);
 	// data block용 새로운 block 할당
@@ -1516,7 +1517,7 @@ static UINT32 get_logblk_page (UINT32 const lblk, UINT32 const lpn)
 // 같은 bank에서 empty block 한개를 반환한다 - complete
 static UINT32 get_empty_blk (UINT32 const bank)
 {
-	UINT32 blk, offset;
+	UINT32 offset;
 	UINT32 i, bytes, vbn;
 		
 	//uart_printf("get_empty_blk :: bank %d", bank);
@@ -1577,7 +1578,7 @@ static BOOL8 set_empty_blk (UINT32 const bank, UINT32 const vbn)
 // garbage collection - complete
 static UINT32 garbage_collection (UINT32 const bank, UINT32 const logblk)
 {
-	UINT32 vblk, lbn, vbn, new_dbn, offset, bit_offset;
+	UINT32 vblk, lbn, vbn, new_dbn, offset;
 	UINT32 i32, is_fmerge, j32;
 	UINT8 d8;
 
@@ -1830,6 +1831,9 @@ static void logging_misc_block (void)
 	UINT32 misc_meta_bytes = NUM_MISC_META_SECT * BYTES_PER_SECTOR; // per bank
     UINT32 bank;
 
+#ifdef __TEST_LOGGING
+	uart_printf ("logging_misc_block :: start");
+#endif
     flash_finish();
 
 	// block에 쓰인 이전 log를 삭제
@@ -1841,7 +1845,7 @@ static void logging_misc_block (void)
     // srma에 있는 misc metadata를 nand로 저장
     for (bank = 0; bank < NUM_BANKS; bank++)
     {
-		mem_copy(FTL_BUF(bank), &g_misc_meta[bank], misc_meta_bytes);
+		mem_copy_mod((void *)FTL_BUF(bank), (void *)&g_misc_meta[bank], misc_meta_bytes);
 
         nand_page_ptprogram(bank,
                             get_miscblk_vbn(bank),
@@ -1857,7 +1861,11 @@ static void logging_misc_block (void)
 static void logging_data_block (void)
 {
 	UINT32 i32, bank, nblk, vbn, vpn, dblk_addr;
-	UINT32 remain_bytes, write_bytes;
+	UINT32 remain_bytes, write_bytes, sectors;
+
+#ifdef __TEST_LOGGING
+	uart_printf ("logging_data_block :: start");
+#endif
 
 	remain_bytes = DATA_BLK_BYTES / NUM_BANKS;
 
@@ -1892,10 +1900,12 @@ static void logging_data_block (void)
 			vbn = get_mapblk_vbn (bank, nblk);
 			
 			// data block mapping table을 ftl buffer로 이동
-			mem_copy (FTL_BUF(bank), dblk_addr + bank * DATA_BLK_SIZE * BLKS_PER_BANK, write_bytes);
+			mem_copy_mod ((void *)FTL_BUF(bank), (void *)(dblk_addr + bank * DATA_BLK_SIZE * BLKS_PER_BANK), write_bytes);
 
 			// ftl buffer에서 nand flash로 이동
-			nand_page_ptprogram (bank, vbn, vpn, 0, write_bytes / BYTES_PER_SECTOR, FTL_BUF(bank));
+			sectors = write_bytes / BYTES_PER_SECTOR;
+			if ((write_bytes % BYTES_PER_SECTOR) != 0) sectors++;
+			nand_page_ptprogram (bank, vbn, vpn, 0, sectors, FTL_BUF(bank));
 		}
 		remain_bytes -= write_bytes;	
 		dblk_addr += write_bytes;
@@ -1915,7 +1925,11 @@ static void logging_data_block (void)
 static void logging_log_block (void)
 {
 	UINT32 i32, bank, nblk, vbn, vpn, dblk_addr;
-	UINT32 remain_bytes, write_bytes;
+	UINT32 remain_bytes, write_bytes, sectors;
+
+#ifdef __TEST_LOGGING
+	uart_printf ("logging_log_block :: start");
+#endif
 
 	// block에 쓰인 이전 log를 삭제
 	for (bank = 0; bank < NUM_BANKS; bank++) 
@@ -1944,16 +1958,22 @@ static void logging_log_block (void)
 			write_bytes = remain_bytes;
 		}
 
+#ifdef __TEST_LOGGING
+		uart_printf ("logging_log_block :: remain_bytes %d write_bytes %d", remain_bytes, write_bytes);
+#endif
+
 		// 각 bank에 backup
 		for (bank = 0; bank < NUM_BANKS; bank++) 
 		{
 			vbn = get_logblkmap_vbn (bank, nblk);
 			
 			// data block mapping table을 ftl buffer로 이동
-			mem_copy (FTL_BUF(bank), dblk_addr + bank * LOG_BLK_SIZE * NUM_LOG_BLKS, write_bytes);
+			mem_copy_mod ((void *)FTL_BUF(bank), (void *)(dblk_addr + bank * LOG_BLK_SIZE * NUM_LOG_BLKS), write_bytes);
 
 			// ftl buffer에서 nand flash로 이동
-			nand_page_ptprogram (bank, vbn, vpn, 0, write_bytes / BYTES_PER_SECTOR, FTL_BUF(bank));
+			sectors = write_bytes / BYTES_PER_SECTOR;
+			if ((write_bytes % BYTES_PER_SECTOR) != 0) sectors++;
+			nand_page_ptprogram (bank, vbn, vpn, 0, sectors, FTL_BUF(bank));
 		}
 		remain_bytes -= write_bytes;	
 		dblk_addr += write_bytes;
@@ -1973,8 +1993,11 @@ static void logging_log_block (void)
 static void logging_empty_block (void)
 {
 	UINT32 i32, bank, nblk, vbn, vpn, dblk_addr;
-	UINT32 remain_bytes, write_bytes;
+	UINT32 remain_bytes, write_bytes, sectors;
 
+#ifdef __TEST_LOGGING
+	uart_printf ("logging_empty_block :: start");
+#endif
 	// block에 쓰인 이전 log를 삭제
 	for (bank = 0; bank < NUM_BANKS; bank++) 
 	{
@@ -2008,10 +2031,12 @@ static void logging_empty_block (void)
 			vbn = get_emptyblk_vbn (bank, nblk);
 			
 			// data block mapping table을 ftl buffer로 이동
-			mem_copy (FTL_BUF(bank), dblk_addr + bank * (EMPTY_BLK_BYTES / NUM_BANKS), write_bytes);
+			mem_copy_mod ((void *)FTL_BUF(bank), (void *)(dblk_addr + bank * (EMPTY_BLK_BYTES / NUM_BANKS)), write_bytes);
 
 			// ftl buffer에서 nand flash로 이동
-			nand_page_ptprogram (bank, vbn, vpn, 0, write_bytes / BYTES_PER_SECTOR, FTL_BUF(bank));
+			sectors = write_bytes / BYTES_PER_SECTOR;
+			if ((write_bytes % BYTES_PER_SECTOR) != 0) sectors++;
+			nand_page_ptprogram (bank, vbn, vpn, 0, sectors, FTL_BUF(bank));
 		}
 		remain_bytes -= write_bytes;	
 		dblk_addr += write_bytes;
@@ -2031,11 +2056,7 @@ static void logging_empty_block (void)
 //nand flash에서 sram의 전역변수 값들을 load한다
 static void load_misc_block (void)
 {
-	UINT32 misc_meta_bytes = NUM_MISC_META_SECT * BYTES_PER_SECTOR;
-
-    UINT32 load_flag = 0;
     UINT32 bank, blk;
-    UINT32 load_cnt = 0;
 
 #ifdef __TEST_PWRECV
 	uart_printf ("load_misc_block :: start");
@@ -2073,14 +2094,14 @@ static void load_misc_block (void)
 	}
 
 #ifdef __TEST_PWRECV
-	uart_printf ("load_misc_block :: start");
+	uart_printf ("load_misc_block :: end");
 #endif 
 }
 
 static void load_data_block (void)
 {
 	UINT32 bank, nblk, vbn, vpn, dblk_addr;
-	UINT32 remain_bytes, write_bytes;
+	UINT32 remain_bytes, write_bytes, sectors;
 
 #ifdef __TEST_PWRECV
 	uart_printf ("load_data_block :: start");
@@ -2094,10 +2115,6 @@ static void load_data_block (void)
 	dblk_addr = DATA_BLK_ADDR;
 	while (remain_bytes > 0) 
 	{
-#ifdef __TEST_PWRECV
-		uart_printf ("load_data_block :: remain bytes %d", remain_bytes);
-#endif 
-
 		//한번에 한 page씩 nand로 back up
 		if (remain_bytes > BYTES_PER_PAGE)
 		{
@@ -2107,6 +2124,10 @@ static void load_data_block (void)
 		{
 			write_bytes = remain_bytes;
 		}
+
+#ifdef __TEST_PWRECV
+		uart_printf ("load_data_block :: remain bytes %d write bytes %d", remain_bytes, write_bytes);
+#endif 
 
 		// 각 bank에 backup
 		for (bank = 0; bank < NUM_BANKS; bank++) 
@@ -2118,7 +2139,9 @@ static void load_data_block (void)
 #endif 
 
 			// nand flash에서 ftl buffer로 logging data 이동
-			nand_page_ptread (bank, vbn, vpn, 0, write_bytes / BYTES_PER_SECTOR, FTL_BUF(bank), RETURN_ON_ISSUE);
+			sectors = write_bytes / BYTES_PER_SECTOR;
+			if ((write_bytes % BYTES_PER_SECTOR) != 0) sectors++;
+			nand_page_ptread (bank, vbn, vpn, 0, sectors, FTL_BUF(bank), RETURN_ON_ISSUE);
 		}
 
 		flash_finish();
@@ -2126,7 +2149,7 @@ static void load_data_block (void)
 		for (bank = 0; bank < NUM_BANKS; bank++)
 		{			
 			// ftl buffer에서 data block mapping table로 logging data 이동
-			mem_copy (dblk_addr + bank * DATA_BLK_SIZE * BLKS_PER_BANK, FTL_BUF(bank), write_bytes);
+			mem_copy_mod ((void *)(dblk_addr + bank * DATA_BLK_SIZE * BLKS_PER_BANK), (void *)FTL_BUF(bank), write_bytes);
 		}
 
 		remain_bytes -= write_bytes;	
@@ -2150,7 +2173,7 @@ static void load_data_block (void)
 static void load_log_block (void)
 {
 	UINT32 bank, nblk, vbn, vpn, dblk_addr;
-	UINT32 remain_bytes, write_bytes;
+	UINT32 remain_bytes, write_bytes, sectors;
 
 #ifdef __TEST_PWRECV
 	uart_printf ("load_log_block :: start");
@@ -2188,13 +2211,15 @@ static void load_log_block (void)
 #endif 
 
 			// nand flash에서 ftl buffer로 logging data 이동
-			nand_page_ptread (bank, vbn, vpn, 0, write_bytes / BYTES_PER_SECTOR, FTL_BUF(bank), RETURN_ON_ISSUE);
+			sectors = write_bytes / BYTES_PER_SECTOR;
+			if ((write_bytes % BYTES_PER_SECTOR) != 0) sectors++;
+			nand_page_ptread (bank, vbn, vpn, 0, sectors, FTL_BUF(bank), RETURN_ON_ISSUE);
 		}
 		flash_finish();
 		for (bank = 0; bank < NUM_BANKS; bank++)
 		{
 			// ftl buffer에서 data block mapping table로 logging data 이동
-			mem_copy (dblk_addr + bank * LOG_BLK_SIZE * NUM_LOG_BLKS, FTL_BUF(bank), write_bytes);
+			mem_copy_mod ((void *)(dblk_addr + bank * LOG_BLK_SIZE * NUM_LOG_BLKS), (void *)FTL_BUF(bank), write_bytes);
 		
 		}
 
@@ -2218,7 +2243,7 @@ static void load_log_block (void)
 static void load_empty_block (void)
 {
 	UINT32 bank, nblk, vbn, vpn, dblk_addr;
-	UINT32 remain_bytes, write_bytes;
+	UINT32 remain_bytes, write_bytes, sectors;
 
 #ifdef __TEST_PWRECV
 	uart_printf ("load_empty_block :: start");
@@ -2256,13 +2281,15 @@ static void load_empty_block (void)
 #endif 
 
 			// nand flash에서 ftl buffer로 logging data 이동
-			nand_page_ptread (bank, vbn, vpn, 0, write_bytes / BYTES_PER_SECTOR, FTL_BUF(bank), RETURN_ON_ISSUE);
+			sectors = write_bytes / BYTES_PER_SECTOR;
+			if ((write_bytes % BYTES_PER_SECTOR) != 0) sectors++;
+			nand_page_ptread (bank, vbn, vpn, 0, sectors, FTL_BUF(bank), RETURN_ON_ISSUE);
 		}
 		flash_finish();
 		for (bank = 0; bank < NUM_BANKS; bank++)
 		{			
 			// ftl buffer에서 data block mapping table로 logging data 이동
-			mem_copy (dblk_addr + bank * (EMPTY_BLK_BYTES / NUM_BANKS), FTL_BUF(bank), write_bytes);
+			mem_copy_mod ((void *)(dblk_addr + bank * (EMPTY_BLK_BYTES / NUM_BANKS)), (void *)FTL_BUF(bank), write_bytes);
 		}
 
 		remain_bytes -= write_bytes;	
@@ -2282,5 +2309,36 @@ static void load_empty_block (void)
 #endif 
 }
 
+static void mem_copy_mod (void * const dst, const void * const src, UINT32 const num_bytes)
+{
+	UINT32 i32, d, s;
+	UINT8 d8;
 
+	d = (UINT32) dst;
+	s = (UINT32) src;
 
+	// dram to dram copy에서 ecc size에 align 되지 않은 경우
+	if ((d > DRAM_BASE) && (s > DRAM_BASE) && ((num_bytes % DRAM_ECC_UNIT) != 0))
+	{
+		UINT32 aligned;
+
+		aligned = (num_bytes / DRAM_ECC_UNIT) * DRAM_ECC_UNIT;
+		mem_copy (dst, src, aligned);
+
+		// 1 byte씩 이동
+		//uart_printf("mem_copy_mod :: write 1 byte : num_bytes %d", num_bytes);
+
+		for (i32 = 0; i32 < (num_bytes - aligned); i32++)
+		{
+			//uart_printf ("mem_copy_mod :: %d / %d", i32, num_bytes - aligned);
+			d8 = read_dram_8 (src + aligned + i32);
+			write_dram_8 (dst + aligned + i32, d8);
+		}
+	}
+
+	// sram <-> dram copy, ecc size에 align된 dram to dram copy는 mem_copy로 이동
+	else
+	{
+		mem_copy (dst, src, num_bytes);
+	}
+}
