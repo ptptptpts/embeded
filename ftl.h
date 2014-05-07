@@ -28,8 +28,8 @@
 //#define __TEST_WRT
 //#define __TEST_RD
 //#define __TEST_LB
-//#define __TEST_LOGGING
-//#define __TEST_PWRECV
+#define __TEST_LOGGING
+#define __TEST_PWRECV
 
 /////////////////
 // DRAM buffers
@@ -43,7 +43,7 @@
 #define NUM_HIL_BUFFERS		1
 #define NUM_TEMP_BUFFERS	1
 
-#define NUM_LOG_BLKS		8
+#define NUM_LOG_BLKS		3
 
 #define DRAM_BYTES_OTHER	((NUM_COPY_BUFFERS + NUM_FTL_BUFFERS + NUM_HIL_BUFFERS + NUM_TEMP_BUFFERS) * BYTES_PER_PAGE \
 + BAD_BLK_BMP_BYTES + DATA_BLK_BYTES + LOG_BLK_BYTES + EMPTY_BLK_BYTES + FTL_TEST_BYTES)
@@ -151,6 +151,6 @@ void ftl_test_write(UINT32 const lba, UINT32 const num_sectors);
 void ftl_flush(void);
 void ftl_isr(void);
 
-BOOL32 check_format_mark(void);
+UINT8 gCheckRecovery;
 
 #endif //FTL_H
